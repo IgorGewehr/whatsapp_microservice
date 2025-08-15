@@ -56,15 +56,16 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
       timestamp: new Date().toISOString()
     });
 
-  } catch (error) {
-    if (error.name === 'TokenExpiredError') {
+  } catch (error: unknown) {
+    const err = error as Error;
+    if (err.name === 'TokenExpiredError') {
       res.status(401).json({
         success: false,
         error: 'Token expired',
         message: 'Authentication token has expired',
         timestamp: new Date().toISOString()
       });
-    } else if (error.name === 'JsonWebTokenError') {
+    } else if (err.name === 'JsonWebTokenError') {
       res.status(401).json({
         success: false,
         error: 'Invalid token',

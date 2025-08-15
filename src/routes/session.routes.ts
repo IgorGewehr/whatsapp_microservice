@@ -38,11 +38,12 @@ export function sessionRoutes(whatsappService: WhatsAppService, tenantManager: T
           timestamp: new Date().toISOString()
         });
         
-      } catch (error) {
+      } catch (error: unknown) {
+        const err = error as Error;
         res.status(500).json({
           success: false,
           error: 'Failed to start WhatsApp session',
-          message: error.message,
+          message: err.message,
           timestamp: new Date().toISOString()
         });
       }
@@ -64,11 +65,12 @@ export function sessionRoutes(whatsappService: WhatsAppService, tenantManager: T
           timestamp: new Date().toISOString()
         });
         
-      } catch (error) {
+      } catch (error: unknown) {
+        const err = error as Error;
         res.status(500).json({
           success: false,
           error: 'Failed to get session status',
-          message: error.message,
+          message: err.message,
           timestamp: new Date().toISOString()
         });
       }
@@ -94,11 +96,12 @@ export function sessionRoutes(whatsappService: WhatsAppService, tenantManager: T
           timestamp: new Date().toISOString()
         });
         
-      } catch (error) {
+      } catch (error: unknown) {
+        const err = error as Error;
         res.status(500).json({
           success: false,
           error: 'Failed to get QR code',
-          message: error.message,
+          message: err.message,
           timestamp: new Date().toISOString()
         });
       }
@@ -120,11 +123,12 @@ export function sessionRoutes(whatsappService: WhatsAppService, tenantManager: T
           timestamp: new Date().toISOString()
         });
         
-      } catch (error) {
+      } catch (error: unknown) {
+        const err = error as Error;
         res.status(500).json({
           success: false,
           error: 'Failed to disconnect session',
-          message: error.message,
+          message: err.message,
           timestamp: new Date().toISOString()
         });
       }
@@ -157,11 +161,12 @@ export function sessionRoutes(whatsappService: WhatsAppService, tenantManager: T
           timestamp: new Date().toISOString()
         });
         
-      } catch (error) {
+      } catch (error: unknown) {
+        const err = error as Error;
         res.status(500).json({
           success: false,
           error: 'Failed to restart session',
-          message: error.message,
+          message: err.message,
           timestamp: new Date().toISOString()
         });
       }
@@ -184,11 +189,12 @@ export function sessionRoutes(whatsappService: WhatsAppService, tenantManager: T
           timestamp: new Date().toISOString()
         });
         
-      } catch (error) {
+      } catch (error: unknown) {
+        const err = error as Error;
         res.status(500).json({
           success: false,
           error: 'Failed to get active sessions',
-          message: error.message,
+          message: err.message,
           timestamp: new Date().toISOString()
         });
       }
@@ -234,11 +240,12 @@ export function sessionRoutes(whatsappService: WhatsAppService, tenantManager: T
           timestamp: new Date().toISOString()
         });
         
-      } catch (error) {
+      } catch (error: unknown) {
+        const err = error as Error;
         res.status(500).json({
           success: false,
           error: 'Failed to poll session status',
-          message: error.message,
+          message: err.message,
           timestamp: new Date().toISOString()
         });
       }

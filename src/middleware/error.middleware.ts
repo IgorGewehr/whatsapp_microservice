@@ -15,7 +15,7 @@ export function errorHandler(logger: Logger) {
     }
 
     // Log do erro
-    logger.error('Unhandled error:', {
+    (logger as any).error({
       error: err.message,
       stack: err.stack,
       url: req.originalUrl,
@@ -23,7 +23,7 @@ export function errorHandler(logger: Logger) {
       ip: req.ip,
       userAgent: req.get('User-Agent'),
       tenantId: (req as any).tenantId
-    });
+    }, 'Unhandled error');
 
     // Determinar status code
     let statusCode = err.statusCode || 500;

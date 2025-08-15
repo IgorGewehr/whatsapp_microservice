@@ -109,11 +109,12 @@ export function messageRoutes(whatsappService: WhatsAppService, tenantManager: T
           });
         }
         
-      } catch (error) {
+      } catch (error: unknown) {
+        const err = error as Error;
         res.status(500).json({
           success: false,
           error: 'Internal server error',
-          message: error.message,
+          message: err.message,
           timestamp: new Date().toISOString()
         });
       }
@@ -191,11 +192,12 @@ export function messageRoutes(whatsappService: WhatsAppService, tenantManager: T
           });
         }
         
-      } catch (error) {
+      } catch (error: unknown) {
+        const err = error as Error;
         res.status(500).json({
           success: false,
           error: 'Internal server error',
-          message: error.message,
+          message: err.message,
           timestamp: new Date().toISOString()
         });
       }
@@ -235,12 +237,13 @@ export function messageRoutes(whatsappService: WhatsAppService, tenantManager: T
               await new Promise(resolve => setTimeout(resolve, 2000));
             }
             
-          } catch (error) {
+          } catch (error: unknown) {
+            const err = error as Error;
             results.push({
               index: i,
               to: messageData.to,
               success: false,
-              error: error.message
+              error: err.message
             });
           }
         }
@@ -262,11 +265,12 @@ export function messageRoutes(whatsappService: WhatsAppService, tenantManager: T
           timestamp: new Date().toISOString()
         });
         
-      } catch (error) {
+      } catch (error: unknown) {
+        const err = error as Error;
         res.status(500).json({
           success: false,
           error: 'Bulk message sending failed',
-          message: error.message,
+          message: err.message,
           timestamp: new Date().toISOString()
         });
       }
@@ -310,11 +314,12 @@ export function messageRoutes(whatsappService: WhatsAppService, tenantManager: T
           timestamp: new Date().toISOString()
         });
         
-      } catch (error) {
+      } catch (error: unknown) {
+        const err = error as Error;
         res.status(500).json({
           success: false,
           error: 'Failed to check phone number',
-          message: error.message,
+          message: err.message,
           timestamp: new Date().toISOString()
         });
       }
@@ -347,11 +352,12 @@ export function messageRoutes(whatsappService: WhatsAppService, tenantManager: T
           timestamp: new Date().toISOString()
         });
         
-      } catch (error) {
+      } catch (error: unknown) {
+        const err = error as Error;
         res.status(500).json({
           success: false,
           error: 'Failed to get message history',
-          message: error.message,
+          message: err.message,
           timestamp: new Date().toISOString()
         });
       }

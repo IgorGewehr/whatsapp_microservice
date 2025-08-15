@@ -46,7 +46,7 @@ export class WhatsAppService extends EventEmitter {
 
   constructor(logger: Logger) {
     super();
-    this.logger = logger.child({ service: 'WhatsAppService' });
+    this.logger = (logger as any).child({ service: 'WhatsAppService' });
     this.sessionDir = config.WHATSAPP_SESSION_DIR;
     this.cache = new NodeCache({ 
       stdTTL: config.CACHE_TTL,
@@ -75,9 +75,10 @@ export class WhatsAppService extends EventEmitter {
       fs.writeFileSync(testFile, 'test');
       fs.unlinkSync(testFile);
       
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error('Failed to setup session directory:', error);
-      throw new Error(`Cannot setup session directory: ${error.message}`);
+      const err = error as Error;
+      throw new Error(`Cannot setup session directory: ${err.message}`);
     }
   }
 
@@ -144,7 +145,7 @@ export class WhatsAppService extends EventEmitter {
         message: 'Session initialization started'
       };
 
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error('Failed to start session:', error);
       throw error;
     }
@@ -165,7 +166,7 @@ export class WhatsAppService extends EventEmitter {
 
       // Buscar versão mais recente do Baileys
       const { version } = await fetchLatestBaileysVersion();
-      this.logger.info('Using Baileys version', { version, tenantId });
+      (this.logger as any).info({ version, tenantId }, 'Using Baileys version');
 
       // Configurar estado de autenticação
       const { state, saveCreds } = await useMultiFileAuthState(authDir);
@@ -175,9 +176,9 @@ export class WhatsAppService extends EventEmitter {
         version,
         auth: {
           creds: state.creds,
-          keys: makeCacheableSignalKeyStore(state.keys, this.logger)
+          keys: makeCacheableSignalKeyStore(state.keys, this.logger as any)
         },
-        logger: this.logger.child({ module: 'baileys', tenantId }),
+        logger: (this.logger as any).child({ module: 'baileys', tenantId }),
         ...config.BAILEYS_CONFIG
       });
 
@@ -202,9 +203,9 @@ export class WhatsAppService extends EventEmitter {
         }
       });
 
-      this.logger.info('Baileys socket created successfully', { tenantId });
+      (this.logger as any).info({ tenantId }, 'Baileys socket created successfully');
 
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error('Failed to create Baileys connection:', error);
       session.status = 'disconnected';
       throw error;
@@ -217,19 +218,17 @@ export class WhatsAppService extends EventEmitter {
 
     const { connection, lastDisconnect, qr } = update;
 
-    this.logger.info('Connection update received', {
+    (this.logger as any).info({
       tenantId,
       connection,
       hasQr: !!qr,
       qrLength: qr?.length
-    });
+    }, 'Connection update received');
 
     // QR Code gerado
     if (qr) {
       try {
         const qrDataUrl = await QRCode.toDataURL(qr, {
-          type: 'image/png',
-          quality: 1.0,
           margin: 4,
           width: 512,
           errorCorrectionLevel: 'H',
@@ -237,7 +236,7 @@ export class WhatsAppService extends EventEmitter {
             dark: '#000000',
             light: '#FFFFFF'
           }
-        });
+        } as any);
 
         session.qrCode = qrDataUrl;
         session.status = 'qr';
@@ -247,10 +246,10 @@ export class WhatsAppService extends EventEmitter {
         this.cache.set(`qr_${tenantId}`, qrDataUrl, config.QR_TIMEOUT / 1000);
 
         this.emit('qr', tenantId, qrDataUrl);
-        this.logger.info('QR Code generated successfully', { tenantId });
+        (this.logger as any).info({ tenantId }, 'QR Code generated successfully');
 
-      } catch (error) {
-        this.logger.error('Failed to generate QR code:', error);
+      } catch (error: unknown) {
+        (this.logger as any).error(error, 'Failed to generate QR code');
         // Usar QR raw como fallback
         session.qrCode = qr;
         session.status = 'qr';
@@ -283,34 +282,34 @@ export class WhatsAppService extends EventEmitter {
       }
 
       this.emit('connected', tenantId, session.phoneNumber);
-      this.logger.info('WhatsApp connected successfully', {
+      (this.logger as any).info({
         tenantId,
         phone: session.phoneNumber,
         business: session.businessName
-      });
+      }, 'WhatsApp connected successfully');
     }
 
     // Conexão fechada
     if (connection === 'close') {
       const shouldReconnect = (lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
 
-      this.logger.info('Connection closed', {
+      (this.logger as any).info({
         tenantId,
         shouldReconnect,
         reconnectAttempts: session.reconnectAttempts,
         maxAttempts: config.MAX_RECONNECT_ATTEMPTS
-      });
+      }, 'Connection closed');
 
       if (shouldReconnect && session.reconnectAttempts < config.MAX_RECONNECT_ATTEMPTS) {
         // Tentar reconectar com backoff exponencial
         session.reconnectAttempts++;
         const delay = Math.min(5000 * Math.pow(2, session.reconnectAttempts - 1), 30000);
 
-        this.logger.info('Scheduling reconnection', {
+        (this.logger as any).info({
           tenantId,
           attempt: session.reconnectAttempts,
           delay
-        });
+        }, 'Scheduling reconnection');
 
         const timer = setTimeout(() => {
           this.createBaileysConnection(tenantId).catch((error) => {
@@ -351,11 +350,11 @@ export class WhatsAppService extends EventEmitter {
           type: 'text'
         });
 
-        this.logger.info('Message received', {
+        (this.logger as any).info({
           tenantId,
           from: message.key.remoteJid?.replace('@s.whatsapp.net', '').substring(0, 6) + '***',
           messageId: message.key.id
-        });
+        }, 'Message received');
       }
     }
   }
@@ -375,7 +374,7 @@ export class WhatsAppService extends EventEmitter {
       }
 
       const jid = messageData.to.includes('@') ? messageData.to : `${messageData.to}@s.whatsapp.net`;
-      let content: WAMessageContent;
+      let content: any;
 
       if (messageData.type === 'image' && messageData.mediaUrl) {
         // Baixar e enviar imagem
@@ -422,23 +421,24 @@ export class WhatsAppService extends EventEmitter {
       const sentMessage = await session.socket.sendMessage(jid, content);
       session.lastActivity = new Date();
 
-      this.logger.info('Message sent successfully', {
+      (this.logger as any).info({
         tenantId,
         to: messageData.to.substring(0, 6) + '***',
         type: messageData.type || 'text',
         messageId: sentMessage?.key?.id
-      });
+      }, 'Message sent successfully');
 
       return {
         success: true,
-        messageId: sentMessage?.key?.id
+        messageId: sentMessage?.key?.id || undefined
       };
 
-    } catch (error) {
-      this.logger.error('Failed to send message:', error);
+    } catch (error: unknown) {
+      (this.logger as any).error(error, 'Failed to send message');
+      const err = error as Error;
       return {
         success: false,
-        error: error.message
+        error: err.message
       };
     }
   }
@@ -486,8 +486,8 @@ export class WhatsAppService extends EventEmitter {
       if (session.socket) {
         try {
           await session.socket.logout();
-        } catch (error) {
-          this.logger.warn('Error during logout:', error);
+        } catch (error: unknown) {
+          (this.logger as any).warn(error, 'Error during logout');
         }
       }
 
@@ -502,13 +502,14 @@ export class WhatsAppService extends EventEmitter {
       await this.clearSessionData(tenantId);
       this.cleanupSession(tenantId);
 
-      this.logger.info('Session disconnected successfully', { tenantId });
+      (this.logger as any).info({ tenantId }, 'Session disconnected successfully');
       
       return { success: true, message: 'Session disconnected' };
 
-    } catch (error) {
-      this.logger.error('Failed to disconnect session:', error);
-      return { success: false, message: error.message };
+    } catch (error: unknown) {
+      (this.logger as any).error(error, 'Failed to disconnect session');
+      const err = error as Error;
+      return { success: false, message: err.message };
     }
   }
 
@@ -517,10 +518,10 @@ export class WhatsAppService extends EventEmitter {
       const sessionPath = path.join(this.sessionDir, tenantId);
       if (fs.existsSync(sessionPath)) {
         fs.rmSync(sessionPath, { recursive: true, force: true });
-        this.logger.info('Session data cleared', { tenantId, path: sessionPath });
+        (this.logger as any).info({ tenantId, path: sessionPath }, 'Session data cleared');
       }
-    } catch (error) {
-      this.logger.error('Failed to clear session data:', error);
+    } catch (error: unknown) {
+      (this.logger as any).error(error, 'Failed to clear session data');
     }
   }
 
@@ -531,12 +532,12 @@ export class WhatsAppService extends EventEmitter {
 
   async disconnectAllSessions(): Promise<void> {
     const tenants = Array.from(this.sessions.keys());
-    this.logger.info('Disconnecting all sessions', { count: tenants.length });
+    (this.logger as any).info({ count: tenants.length }, 'Disconnecting all sessions');
 
     const promises = tenants.map(tenantId => this.disconnectSession(tenantId));
     await Promise.allSettled(promises);
 
-    this.logger.info('All sessions disconnected');
+    (this.logger as any).info('All sessions disconnected');
   }
 
   getActiveSessions(): Array<{

@@ -100,10 +100,10 @@ const rawConfig = {
 };
 
 // Parsear e validar configurações
-let config: z.infer<typeof configSchema>;
+let parsedConfig: z.infer<typeof configSchema>;
 
 try {
-  config = configSchema.parse(rawConfig);
+  parsedConfig = configSchema.parse(rawConfig);
 } catch (error) {
   console.error('❌ Erro na configuração de environment variables:');
   if (error instanceof z.ZodError) {
@@ -117,23 +117,23 @@ try {
 }
 
 // Processar ALLOWED_ORIGINS
-const allowedOrigins = config.ALLOWED_ORIGINS === '*' 
+const allowedOrigins = parsedConfig.ALLOWED_ORIGINS === '*' 
   ? true 
-  : config.ALLOWED_ORIGINS.split(',').map(origin => origin.trim());
+  : parsedConfig.ALLOWED_ORIGINS.split(',').map(origin => origin.trim());
 
 // Exportar configuração final
 export const config = {
-  ...config,
+  ...parsedConfig,
   ALLOWED_ORIGINS: allowedOrigins,
   
   // Configurações derivadas
-  IS_PRODUCTION: config.NODE_ENV === 'production',
-  IS_DEVELOPMENT: config.NODE_ENV === 'development',
+  IS_PRODUCTION: parsedConfig.NODE_ENV === 'production',
+  IS_DEVELOPMENT: parsedConfig.NODE_ENV === 'development',
   
   // Configurações de Baileys otimizadas para DigitalOcean
   BAILEYS_CONFIG: {
-    connectTimeoutMs: config.WHATSAPP_TIMEOUT,
-    qrTimeout: config.QR_TIMEOUT,
+    connectTimeoutMs: parsedConfig.WHATSAPP_TIMEOUT,
+    qrTimeout: parsedConfig.QR_TIMEOUT,
     defaultQueryTimeoutMs: 30000,
     keepAliveIntervalMs: 30000,
     markOnlineOnConnect: true,

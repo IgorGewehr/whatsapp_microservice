@@ -93,11 +93,12 @@ export class StatusService {
           loaded: !!baileys.default
         }
       };
-    } catch (error) {
+    } catch (error: unknown) {
+      const err = error as Error;
       services.baileys = {
         status: 'down',
         lastCheck: now,
-        details: { error: error.message }
+        details: { error: err.message }
       };
     }
 
@@ -115,11 +116,12 @@ export class StatusService {
           hasToDataURL: typeof qrcode.toDataURL === 'function'
         }
       };
-    } catch (error) {
+    } catch (error: unknown) {
+      const err = error as Error;
       services.qrcode = {
         status: 'down',
         lastCheck: now,
-        details: { error: error.message }
+        details: { error: err.message }
       };
     }
 
@@ -141,11 +143,12 @@ export class StatusService {
         lastCheck: now,
         details: { path: testPath }
       };
-    } catch (error) {
+    } catch (error: unknown) {
+      const err = error as Error;
       services.filesystem = {
         status: 'down',
         lastCheck: now,
-        details: { error: error.message }
+        details: { error: err.message }
       };
     }
 
@@ -171,7 +174,7 @@ export class StatusService {
       // Esta é uma estimativa simplificada - em produção você pode usar uma biblioteca específica
       diskTotal = 1000000000; // 1GB como padrão
       diskUsed = stats.size || 0;
-    } catch (error) {
+    } catch (error: unknown) {
       // Ignorar erros de disk usage
     }
 

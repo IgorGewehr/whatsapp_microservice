@@ -41,12 +41,13 @@ export function webhookRoutes(whatsappService: WhatsAppService, tenantManager: T
           timestamp: new Date().toISOString()
         });
         
-      } catch (error) {
+      } catch (error: unknown) {
         req.log?.error('Failed to process incoming message:', error);
+        const err = error as Error;
         res.status(500).json({
           success: false,
           error: 'Failed to process message',
-          message: error.message,
+          message: err.message,
           timestamp: new Date().toISOString()
         });
       }
@@ -73,12 +74,13 @@ export function webhookRoutes(whatsappService: WhatsAppService, tenantManager: T
           timestamp: new Date().toISOString()
         });
         
-      } catch (error) {
+      } catch (error: unknown) {
         req.log?.error('Failed to process status change:', error);
+        const err = error as Error;
         res.status(500).json({
           success: false,
           error: 'Failed to process status change',
-          message: error.message,
+          message: err.message,
           timestamp: new Date().toISOString()
         });
       }
@@ -115,11 +117,12 @@ export function webhookRoutes(whatsappService: WhatsAppService, tenantManager: T
           timestamp: new Date().toISOString()
         });
         
-      } catch (error) {
+      } catch (error: unknown) {
+        const err = error as Error;
         res.status(400).json({
           success: false,
           error: 'Failed to register webhook',
-          message: error.message,
+          message: err.message,
           timestamp: new Date().toISOString()
         });
       }
@@ -146,11 +149,12 @@ export function webhookRoutes(whatsappService: WhatsAppService, tenantManager: T
           timestamp: new Date().toISOString()
         });
         
-      } catch (error) {
+      } catch (error: unknown) {
+        const err = error as Error;
         res.status(500).json({
           success: false,
           error: 'Failed to get webhooks',
-          message: error.message,
+          message: err.message,
           timestamp: new Date().toISOString()
         });
       }
@@ -171,11 +175,12 @@ export function webhookRoutes(whatsappService: WhatsAppService, tenantManager: T
           timestamp: new Date().toISOString()
         });
         
-      } catch (error) {
+      } catch (error: unknown) {
+        const err = error as Error;
         res.status(500).json({
           success: false,
           error: 'Failed to remove webhook',
-          message: error.message,
+          message: err.message,
           timestamp: new Date().toISOString()
         });
       }
@@ -196,11 +201,12 @@ export function webhookRoutes(whatsappService: WhatsAppService, tenantManager: T
           timestamp: new Date().toISOString()
         });
         
-      } catch (error) {
+      } catch (error: unknown) {
+        const err = error as Error;
         res.status(500).json({
           success: false,
           error: 'Failed to test webhook',
-          message: error.message,
+          message: err.message,
           timestamp: new Date().toISOString()
         });
       }
@@ -244,11 +250,12 @@ export function webhookRoutes(whatsappService: WhatsAppService, tenantManager: T
           timestamp: new Date().toISOString()
         });
         
-      } catch (error) {
+      } catch (error: unknown) {
+        const err = error as Error;
         res.status(500).json({
           success: false,
           error: 'Failed to get webhook stats',
-          message: error.message,
+          message: err.message,
           timestamp: new Date().toISOString()
         });
       }

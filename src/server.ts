@@ -9,7 +9,7 @@ import { WhatsAppService } from './services/whatsapp.service';
 import { TenantManager } from './services/tenant.service';
 import { authMiddleware } from './middleware/auth.middleware';
 import { errorHandler } from './middleware/error.middleware';
-import { validateRequest } from './middleware/validation.middleware';
+import { validateRequestBody } from './middleware/validation.middleware';
 import { sessionRoutes } from './routes/session.routes';
 import { messageRoutes } from './routes/message.routes';
 import { webhookRoutes } from './routes/webhook.routes';
@@ -58,7 +58,7 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // Logging HTTP
-app.use(pinoHttp({ logger }));
+app.use(pinoHttp({ logger: logger as any }));
 
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
@@ -74,8 +74,8 @@ app.get('/health', async (req, res) => {
   try {
     const health = await statusService.getSystemHealth();
     res.status(health.status === 'healthy' ? 200 : 503).json(health);
-  } catch (error) {
-    logger.error('Health check failed:', error);
+  } catch (error: unknown) {
+    (logger as any).error(error, 'Health check failed');
     res.status(503).json({
       status: 'error',
       message: 'Health check failed',
@@ -179,8 +179,8 @@ process.on('SIGTERM', async () => {
       logger.info('HTTP server closed');
       process.exit(0);
     });
-  } catch (error) {
-    logger.error('Error during graceful shutdown:', error);
+  } catch (error: unknown) {
+    (logger as any).error(error, 'Error during graceful shutdown');
     process.exit(1);
   }
 });
@@ -191,8 +191,8 @@ process.on('SIGINT', async () => {
   try {
     await whatsappService.disconnectAllSessions();
     process.exit(0);
-  } catch (error) {
-    logger.error('Error during SIGINT shutdown:', error);
+  } catch (error: unknown) {
+    (logger as any).error(error, 'Error during SIGINT shutdown');
     process.exit(1);
   }
 });

@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 
-type AsyncController = (req: Request, res: Response, next: NextFunction) => Promise<void>;
+type AsyncController = (req: Request, res: Response, next: NextFunction) => Promise<void | any>;
 
 /**
  * Wrapper para handlers assíncronos do Express
