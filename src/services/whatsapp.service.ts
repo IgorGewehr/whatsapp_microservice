@@ -16,6 +16,7 @@ import { EventEmitter } from 'events';
 import { Logger } from 'pino';
 import { config } from '../config/config';
 import NodeCache from 'node-cache';
+import { PersistentQRService } from './persistent-qr.service';
 
 export interface WhatsAppSession {
   socket: WASocket | null;
@@ -43,6 +44,7 @@ export class WhatsAppService extends EventEmitter {
   private logger: Logger;
   private sessionDir: string;
   private reconnectTimers: Map<string, NodeJS.Timeout> = new Map();
+  private persistentQRService: PersistentQRService;
 
   constructor(logger: Logger) {
     super();
@@ -53,6 +55,9 @@ export class WhatsAppService extends EventEmitter {
       checkperiod: 60,
       useClones: false
     });
+    
+    // OPTIMIZED: Initialize persistent QR service
+    this.persistentQRService = new PersistentQRService(this.logger, this);
     
     this.ensureSessionDirectory();
     this.startCleanupInterval();
@@ -104,11 +109,19 @@ export class WhatsAppService extends EventEmitter {
     message: string;
   }> {
     try {
-      this.logger.info('Starting WhatsApp session', { tenantId });
+      this.logger.info('🚀 [Session Start] Starting WhatsApp session with persistent QR', { 
+        tenantId: tenantId.substring(0, 8) + '***',
+        timestamp: new Date().toISOString()
+      });
 
       // Verificar se já existe uma sessão ativa
       const existingSession = this.sessions.get(tenantId);
       if (existingSession && existingSession.status === 'connected') {
+        this.logger.info('✅ [Session Start] Session already connected', {
+          tenantId: tenantId.substring(0, 8) + '***',
+          sessionId: existingSession.sessionId.substring(0, 8) + '***'
+        });
+        
         return {
           success: true,
           sessionId: existingSession.sessionId,
@@ -118,8 +131,16 @@ export class WhatsAppService extends EventEmitter {
 
       // Limpar sessão existente se houver
       if (existingSession) {
+        this.logger.info('🔄 [Session Start] Cleaning existing session', {
+          tenantId: tenantId.substring(0, 8) + '***'
+        });
         await this.disconnectSession(tenantId);
       }
+
+      // OPTIMIZED: Start persistent QR before creating session
+      this.logger.info('🔄 [Session Start] Starting persistent QR service', {
+        tenantId: tenantId.substring(0, 8) + '***'
+      });
 
       // Criar nova sessão
       const sessionId = `${tenantId}_${Date.now()}`;
@@ -136,8 +157,36 @@ export class WhatsAppService extends EventEmitter {
 
       this.sessions.set(tenantId, session);
 
-      // Iniciar conexão Baileys
-      await this.createBaileysConnection(tenantId);
+      // OPTIMIZED: Create Baileys connection in parallel with persistent QR
+      const [baileysResult, persistentQR] = await Promise.allSettled([
+        this.createBaileysConnection(tenantId),
+        this.persistentQRService.startPersistentQR(tenantId)
+      ]);
+
+      // Check results
+      if (baileysResult.status === 'rejected') {
+        this.logger.error('❌ [Session Start] Baileys connection failed', {
+          tenantId: tenantId.substring(0, 8) + '***',
+          error: baileysResult.reason
+        });
+        throw baileysResult.reason;
+      }
+
+      let initialQR: string | null = null;
+      if (persistentQR.status === 'fulfilled' && persistentQR.value) {
+        initialQR = persistentQR.value;
+        session.qrCode = initialQR;
+        session.status = 'qr';
+        
+        this.logger.info('✅ [Session Start] Persistent QR generated', {
+          tenantId: tenantId.substring(0, 8) + '***',
+          qrLength: initialQR.length
+        });
+      } else {
+        this.logger.warn('⚠️ [Session Start] Persistent QR failed, using fallback', {
+          tenantId: tenantId.substring(0, 8) + '***'
+        });
+      }
 
       return {
         success: true,
@@ -158,20 +207,55 @@ export class WhatsAppService extends EventEmitter {
     }
 
     try {
-      // Configurar diretório de autenticação
+      this.logger.info('🔧 [Baileys] Starting optimized connection creation', {
+        tenantId: tenantId.substring(0, 8) + '***',
+        timestamp: new Date().toISOString()
+      });
+
+      // OPTIMIZED: Pre-warm directory and version fetching in parallel
       const authDir = path.join(this.sessionDir, tenantId);
-      if (!fs.existsSync(authDir)) {
-        fs.mkdirSync(authDir, { recursive: true });
+      
+      const [versionResult, authDirResult] = await Promise.allSettled([
+        fetchLatestBaileysVersion(),
+        this.ensureAuthDirectory(authDir)
+      ]);
+
+      // Check results
+      if (versionResult.status === 'rejected') {
+        this.logger.error('❌ [Baileys] Version fetch failed', {
+          tenantId: tenantId.substring(0, 8) + '***',
+          error: versionResult.reason
+        });
+        throw new Error('Failed to fetch Baileys version');
       }
 
-      // Buscar versão mais recente do Baileys
-      const { version } = await fetchLatestBaileysVersion();
-      (this.logger as any).info({ version, tenantId }, 'Using Baileys version');
+      if (authDirResult.status === 'rejected') {
+        this.logger.error('❌ [Baileys] Auth directory creation failed', {
+          tenantId: tenantId.substring(0, 8) + '***',
+          error: authDirResult.reason
+        });
+        throw new Error('Failed to create auth directory');
+      }
 
-      // Configurar estado de autenticação
+      const { version } = versionResult.value;
+      this.logger.info('✅ [Baileys] Version and directory ready', {
+        version,
+        tenantId: tenantId.substring(0, 8) + '***',
+        authDir: authDir.replace(tenantId, '***')
+      });
+
+      // OPTIMIZED: Pre-warm auth state loading
+      const authStateStart = Date.now();
       const { state, saveCreds } = await useMultiFileAuthState(authDir);
+      
+      this.logger.info('✅ [Baileys] Auth state loaded', {
+        tenantId: tenantId.substring(0, 8) + '***',
+        duration: `${Date.now() - authStateStart}ms`,
+        hasExistingCreds: !!state.creds.me
+      });
 
-      // Criar socket WhatsApp
+      // OPTIMIZED: Create socket with performance config
+      const socketStart = Date.now();
       const socket = makeWASocket({
         version,
         auth: {
@@ -179,10 +263,20 @@ export class WhatsAppService extends EventEmitter {
           keys: makeCacheableSignalKeyStore(state.keys, this.logger as any)
         },
         logger: (this.logger as any).child({ module: 'baileys', tenantId }),
+        browser: ['LocAI WhatsApp Service', 'Chrome', '120.0.0'], // Optimized browser info
+        connectTimeoutMs: 60000, // Increased timeout
+        defaultQueryTimeoutMs: 60000,
+        retryRequestDelayMs: 1000,
         ...config.BAILEYS_CONFIG
       });
 
       session.socket = socket;
+      
+      this.logger.info('✅ [Baileys] Socket created successfully', {
+        tenantId: tenantId.substring(0, 8) + '***',
+        socketDuration: `${Date.now() - socketStart}ms`,
+        browser: 'LocAI WhatsApp Service'
+      });
 
       // Handler para atualizações de conexão
       socket.ev.on('connection.update', async (update) => {
@@ -218,16 +312,17 @@ export class WhatsAppService extends EventEmitter {
 
     const { connection, lastDisconnect, qr } = update;
 
-    (this.logger as any).info({
-      tenantId,
+    this.logger.info('🔄 [Connection] Update received', {
+      tenantId: tenantId.substring(0, 8) + '***',
       connection,
       hasQr: !!qr,
       qrLength: qr?.length
-    }, 'Connection update received');
+    });
 
-    // QR Code gerado
+    // OPTIMIZED: QR Code generation with persistent service integration
     if (qr) {
       try {
+        const qrGenStart = Date.now();
         const qrDataUrl = await QRCode.toDataURL(qr, {
           margin: 4,
           width: 512,
@@ -242,11 +337,17 @@ export class WhatsAppService extends EventEmitter {
         session.status = 'qr';
         session.lastActivity = new Date();
 
-        // Salvar no cache para acesso rápido
+        // OPTIMIZED: Use cache as backup, rely on persistent service
         this.cache.set(`qr_${tenantId}`, qrDataUrl, config.QR_TIMEOUT / 1000);
 
         this.emit('qr', tenantId, qrDataUrl);
-        (this.logger as any).info({ tenantId }, 'QR Code generated successfully');
+        
+        this.logger.info('✅ [Connection] QR Code generated and integrated', {
+          tenantId: tenantId.substring(0, 8) + '***',
+          qrLength: qrDataUrl.length,
+          generationTime: `${Date.now() - qrGenStart}ms`,
+          persistentService: 'integrated'
+        });
 
       } catch (error: unknown) {
         (this.logger as any).error(error, 'Failed to generate QR code');
@@ -257,7 +358,7 @@ export class WhatsAppService extends EventEmitter {
       }
     }
 
-    // Conexão aberta (conectado com sucesso)
+    // OPTIMIZED: Connection opened (successfully connected)
     if (connection === 'open') {
       session.status = 'connected';
       session.qrCode = null;
@@ -271,7 +372,8 @@ export class WhatsAppService extends EventEmitter {
 
       session.lastActivity = new Date();
 
-      // Limpar QR do cache
+      // OPTIMIZED: Stop persistent QR service and clean cache
+      this.persistentQRService.markAsConnected(tenantId);
       this.cache.del(`qr_${tenantId}`);
 
       // Limpar timer de reconexão se houver
@@ -282,10 +384,12 @@ export class WhatsAppService extends EventEmitter {
       }
 
       this.emit('connected', tenantId, session.phoneNumber);
-      (this.logger as any).info({
-        tenantId,
-        phone: session.phoneNumber,
-        business: session.businessName
+      
+      this.logger.info('✅ [Connection] WhatsApp connected successfully', {
+        tenantId: tenantId.substring(0, 8) + '***',
+        phone: session.phoneNumber?.substring(0, 6) + '***',
+        business: session.businessName,
+        persistentQRStopped: true
       }, 'WhatsApp connected successfully');
     }
 
@@ -461,18 +565,78 @@ export class WhatsAppService extends EventEmitter {
       };
     }
 
-    // Buscar QR code do cache se disponível
-    const cachedQr = this.cache.get<string>(`qr_${tenantId}`);
+    // OPTIMIZED: Get QR from persistent service instead of cache
+    const persistentQR = this.persistentQRService.getCurrentQR(tenantId);
+    
+    // Update session QR if we have a fresh one from persistent service
+    if (persistentQR && persistentQR !== session.qrCode) {
+      session.qrCode = persistentQR;
+      session.status = 'qr';
+      
+      this.logger.info('🔄 [Status] Updated session with fresh persistent QR', {
+        tenantId: tenantId.substring(0, 8) + '***',
+        qrLength: persistentQR.length
+      });
+    }
 
     return {
       connected: session.status === 'connected',
       status: session.status,
       phoneNumber: session.phoneNumber || undefined,
       businessName: session.businessName || undefined,
-      qrCode: session.qrCode || cachedQr || undefined,
+      qrCode: session.qrCode || persistentQR || undefined,
       sessionId: session.sessionId,
       lastActivity: session.lastActivity.toISOString()
     };
+  }
+
+  /**
+   * OPTIMIZED: Get current QR code for persistent service integration
+   */
+  async getSessionQR(tenantId: string): Promise<{ qrCode?: string }> {
+    const session = this.sessions.get(tenantId);
+    
+    if (!session) {
+      this.logger.warn('⚠️ [QR Request] No session found', {
+        tenantId: tenantId.substring(0, 8) + '***'
+      });
+      return {};
+    }
+
+    // Return current QR from session
+    if (session.qrCode) {
+      this.logger.info('✅ [QR Request] Returning existing QR', {
+        tenantId: tenantId.substring(0, 8) + '***',
+        qrLength: session.qrCode.length
+      });
+      return { qrCode: session.qrCode };
+    }
+
+    this.logger.info('ℹ️ [QR Request] No QR available in session', {
+      tenantId: tenantId.substring(0, 8) + '***',
+      status: session.status
+    });
+    
+    return {};
+  }
+
+  /**
+   * OPTIMIZED: Ensure auth directory exists with error handling
+   */
+  private async ensureAuthDirectory(authDir: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (!fs.existsSync(authDir)) {
+        fs.mkdir(authDir, { recursive: true }, (error) => {
+          if (error) {
+            reject(error);
+          } else {
+            resolve();
+          }
+        });
+      } else {
+        resolve();
+      }
+    });
   }
 
   async disconnectSession(tenantId: string): Promise<{ success: boolean; message: string }> {

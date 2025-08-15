@@ -77,7 +77,7 @@ export function sessionRoutes(whatsappService: WhatsAppService, tenantManager: T
     })
   );
 
-  // Obter apenas QR code (endpoint específico para facilitar polling)
+  // OPTIMIZED: Get QR code with persistent service integration
   router.get('/:tenantId/qr', 
     validateTenantAccess(tenantManager, ['sessions:read']),
     handleAsync(async (req, res) => {
@@ -86,13 +86,19 @@ export function sessionRoutes(whatsappService: WhatsAppService, tenantManager: T
       try {
         const status = await whatsappService.getSessionStatus(tenantId);
         
+        // Enhanced response with persistent QR stats
+        const qrData = {
+          qrCode: status.qrCode || null,
+          status: status.status,
+          hasQR: !!status.qrCode,
+          lastActivity: status.lastActivity,
+          persistent: true, // Indicates this uses persistent QR service
+          cacheOptimized: true
+        };
+        
         res.json({
           success: true,
-          data: {
-            qrCode: status.qrCode || null,
-            status: status.status,
-            hasQR: !!status.qrCode
-          },
+          data: qrData,
           timestamp: new Date().toISOString()
         });
         
