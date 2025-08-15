@@ -17,22 +17,51 @@ export function validateTenantAccess(tenantManager: TenantManager, requiredPermi
         return;
       }
 
-      // Verificar se o tenant existe e está ativo
-      const isValidAccess = await tenantManager.validateTenantAccess(tenantId, requiredPermissions);
+      // Verificar se o tenant existe, criar automaticamente se não existir
+      let tenant = await tenantManager.getTenant(tenantId);
       
-      if (!isValidAccess) {
-        const tenant = await tenantManager.getTenant(tenantId);
-        
-        if (!tenant) {
-          res.status(404).json({
+      if (!tenant) {
+        // Auto-criar tenant para compatibilidade com LocAI
+        try {
+          tenant = await tenantManager.createTenant({
+            id: tenantId,
+            name: `LocAI Tenant ${tenantId.substring(0, 8)}`,
+            settings: {
+              maxSessions: 5,
+              rateLimit: {
+                windowMs: 15 * 60 * 1000, // 15 minutos
+                max: 100
+              }
+            },
+            status: 'active'
+          });
+
+          // Criar auth com permissões completas
+          await tenantManager.createTenantAuth(tenantId, {
+            permissions: ['*'] // Todas as permissões
+          });
+
+          req.log?.info('Tenant auto-created', { 
+            tenantId, 
+            name: tenant.name 
+          });
+
+        } catch (createError) {
+          req.log?.error('Failed to auto-create tenant:', createError);
+          res.status(500).json({
             success: false,
-            error: 'Tenant not found',
-            message: `Tenant ${tenantId} does not exist`,
+            error: 'Failed to create tenant',
+            message: `Could not auto-create tenant ${tenantId}`,
             timestamp: new Date().toISOString()
           });
           return;
         }
+      }
 
+      // Verificar se o tenant existe e está ativo
+      const isValidAccess = await tenantManager.validateTenantAccess(tenantId, requiredPermissions);
+      
+      if (!isValidAccess) {
         if (tenant.status !== 'active') {
           res.status(403).json({
             success: false,
