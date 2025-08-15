@@ -83,7 +83,7 @@ class StatusService {
                 responseTime,
                 lastCheck: now,
                 details: {
-                    version: baileys.version || 'unknown',
+                    version: "latest",
                     loaded: !!baileys.default
                 }
             };

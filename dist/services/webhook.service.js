@@ -12,7 +12,7 @@ class WebhookService {
         this.stats = new Map();
         this.logger = console;
         if (logger) {
-            this.logger = logger.child({ service: 'WebhookService' });
+            this.logger = console;
         }
         this.startStatsCleanup();
     }

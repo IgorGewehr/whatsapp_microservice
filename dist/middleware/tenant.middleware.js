@@ -14,18 +14,42 @@ function validateTenantAccess(tenantManager, requiredPermissions = []) {
                 });
                 return;
             }
-            const isValidAccess = await tenantManager.validateTenantAccess(tenantId, requiredPermissions);
-            if (!isValidAccess) {
-                const tenant = await tenantManager.getTenant(tenantId);
-                if (!tenant) {
-                    res.status(404).json({
+            let tenant = await tenantManager.getTenant(tenantId);
+            if (!tenant) {
+                try {
+                    tenant = await tenantManager.createTenant({
+                        id: tenantId,
+                        name: `LocAI Tenant ${tenantId.substring(0, 8)}`,
+                        settings: {
+                            maxSessions: 5,
+                            rateLimit: {
+                                windowMs: 15 * 60 * 1000,
+                                max: 100
+                            }
+                        },
+                        status: 'active'
+                    });
+                    await tenantManager.createTenantAuth(tenantId, {
+                        permissions: ['*']
+                    });
+                    req.log?.info('Tenant auto-created', {
+                        tenantId,
+                        name: tenant.name
+                    });
+                }
+                catch (createError) {
+                    req.log?.error('Failed to auto-create tenant:', createError);
+                    res.status(500).json({
                         success: false,
-                        error: 'Tenant not found',
-                        message: `Tenant ${tenantId} does not exist`,
+                        error: 'Failed to create tenant',
+                        message: `Could not auto-create tenant ${tenantId}`,
                         timestamp: new Date().toISOString()
                     });
                     return;
                 }
+            }
+            const isValidAccess = await tenantManager.validateTenantAccess(tenantId, requiredPermissions);
+            if (!isValidAccess) {
                 if (tenant.status !== 'active') {
                     res.status(403).json({
                         success: false,

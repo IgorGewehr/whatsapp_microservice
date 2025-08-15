@@ -18,7 +18,7 @@ class TenantManager {
             useClones: false
         });
         this.initializeDefaultTenants();
-        this.logger.info('Tenant Manager initialized');
+        console.log('Tenant Manager initialized');
     }
     initializeDefaultTenants() {
         const defaultTenant = {
@@ -42,7 +42,7 @@ class TenantManager {
             permissions: ['*'],
         };
         this.tenantAuth.set('default', defaultAuth);
-        this.logger.info('Default tenant initialized', { tenantId: 'default' });
+        console.log('Default tenant initialized', { tenantId: 'default' });
     }
     async createTenant(tenantData) {
         try {
@@ -57,14 +57,14 @@ class TenantManager {
             }
             this.tenants.set(tenant.id, tenant);
             this.cache.set(`tenant_${tenant.id}`, tenant);
-            this.logger.info('Tenant created successfully', {
+            console.log('Tenant created successfully', {
                 tenantId: tenant.id,
                 name: tenant.name
             });
             return tenant;
         }
         catch (error) {
-            this.logger.error('Failed to create tenant:', error);
+            console.log('Failed to create tenant:', error);
             throw error;
         }
     }
@@ -84,7 +84,7 @@ class TenantManager {
             return tenant;
         }
         catch (error) {
-            this.logger.error('Failed to get tenant:', error);
+            console.log('Failed to get tenant:', error);
             return null;
         }
     }
@@ -103,14 +103,14 @@ class TenantManager {
             await this.validateTenantData(updatedTenant);
             this.tenants.set(tenantId, updatedTenant);
             this.cache.set(`tenant_${tenantId}`, updatedTenant);
-            this.logger.info('Tenant updated successfully', {
+            console.log('Tenant updated successfully', {
                 tenantId,
                 updates: Object.keys(updates)
             });
             return updatedTenant;
         }
         catch (error) {
-            this.logger.error('Failed to update tenant:', error);
+            console.log('Failed to update tenant:', error);
             throw error;
         }
     }
@@ -126,11 +126,11 @@ class TenantManager {
             this.tenantAuth.delete(tenantId);
             this.cache.del(`tenant_${tenantId}`);
             this.cache.del(`auth_${tenantId}`);
-            this.logger.info('Tenant deleted successfully', { tenantId });
+            console.log('Tenant deleted successfully', { tenantId });
             return true;
         }
         catch (error) {
-            this.logger.error('Failed to delete tenant:', error);
+            console.log('Failed to delete tenant:', error);
             throw error;
         }
     }
@@ -138,22 +138,22 @@ class TenantManager {
         try {
             const tenant = await this.getTenant(tenantId);
             if (!tenant) {
-                this.logger.warn('Tenant not found during access validation', { tenantId });
+                console.log('Tenant not found during access validation', { tenantId });
                 return false;
             }
             if (tenant.status !== 'active') {
-                this.logger.warn('Tenant is not active', { tenantId, status: tenant.status });
+                console.log('Tenant is not active', { tenantId, status: tenant.status });
                 return false;
             }
             if (requiredPermissions.length > 0) {
                 const auth = this.tenantAuth.get(tenantId);
                 if (!auth) {
-                    this.logger.warn('No auth found for tenant', { tenantId });
+                    console.log('No auth found for tenant', { tenantId });
                     return false;
                 }
                 const hasPermissions = this.checkPermissions(auth.permissions, requiredPermissions);
                 if (!hasPermissions) {
-                    this.logger.warn('Tenant lacks required permissions', {
+                    console.log('Tenant lacks required permissions', {
                         tenantId,
                         required: requiredPermissions,
                         available: auth.permissions
@@ -164,7 +164,7 @@ class TenantManager {
             return true;
         }
         catch (error) {
-            this.logger.error('Failed to validate tenant access:', error);
+            console.log('Failed to validate tenant access:', error);
             return false;
         }
     }
@@ -207,7 +207,7 @@ class TenantManager {
             }
             this.tenantAuth.set(tenantId, auth);
             this.cache.set(`auth_${tenantId}`, auth, options.expiresIn ? undefined : config_1.config.CACHE_TTL);
-            this.logger.info('Tenant auth created successfully', {
+            console.log('Tenant auth created successfully', {
                 tenantId,
                 hasApiKey: !!auth.apiKey,
                 hasJwtToken: !!auth.jwtToken,
@@ -216,7 +216,7 @@ class TenantManager {
             return auth;
         }
         catch (error) {
-            this.logger.error('Failed to create tenant auth:', error);
+            console.log('Failed to create tenant auth:', error);
             throw error;
         }
     }
@@ -227,7 +227,7 @@ class TenantManager {
                 return null;
             }
             if (auth.expiresAt && auth.expiresAt < new Date()) {
-                this.logger.warn('Tenant auth expired', { tenantId });
+                console.log('Tenant auth expired', { tenantId });
                 this.tenantAuth.delete(tenantId);
                 return null;
             }
@@ -242,13 +242,13 @@ class TenantManager {
                     }
                 }
                 catch (jwtError) {
-                    this.logger.warn('Invalid JWT token', { tenantId, error: jwtError.message });
+                    console.log('Invalid JWT token', { tenantId, error: jwtError.message });
                 }
             }
             return null;
         }
         catch (error) {
-            this.logger.error('Failed to validate tenant auth:', error);
+            console.log('Failed to validate tenant auth:', error);
             return null;
         }
     }
@@ -309,7 +309,7 @@ class TenantManager {
             }
         }
         if (cleanedCount > 0) {
-            this.logger.info('Cleaned up expired auth tokens', { count: cleanedCount });
+            console.log('Cleaned up expired auth tokens', { count: cleanedCount });
         }
     }
 }

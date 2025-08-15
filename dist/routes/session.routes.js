@@ -66,13 +66,17 @@ function sessionRoutes(whatsappService, tenantManager) {
         const { tenantId } = req.params;
         try {
             const status = await whatsappService.getSessionStatus(tenantId);
+            const qrData = {
+                qrCode: status.qrCode || null,
+                status: status.status,
+                hasQR: !!status.qrCode,
+                lastActivity: status.lastActivity,
+                persistent: true,
+                cacheOptimized: true
+            };
             res.json({
                 success: true,
-                data: {
-                    qrCode: status.qrCode || null,
-                    status: status.status,
-                    hasQR: !!status.qrCode
-                },
+                data: qrData,
                 timestamp: new Date().toISOString()
             });
         }

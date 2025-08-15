@@ -62,17 +62,14 @@ export class WhatsAppService extends EventEmitter {
     this.ensureSessionDirectory();
     this.startCleanupInterval();
     
-    this.logger.info('WhatsApp Service initialized', {
-      sessionDir: this.sessionDir,
-      cacheSettings: { ttl: config.CACHE_TTL }
-    });
+    console.log(`WhatsApp Service initialized (sessionDir: ${this.sessionDir}, cacheTTL: ${config.CACHE_TTL})`);
   }
 
   private ensureSessionDirectory(): void {
     try {
       if (!fs.existsSync(this.sessionDir)) {
         fs.mkdirSync(this.sessionDir, { recursive: true });
-        this.logger.info('Session directory created', { path: this.sessionDir });
+        console.log('Session directory created', { path: this.sessionDir });
       }
       
       // Testar permissões de escrita
@@ -81,7 +78,7 @@ export class WhatsAppService extends EventEmitter {
       fs.unlinkSync(testFile);
       
     } catch (error: unknown) {
-      this.logger.error('Failed to setup session directory:', error);
+      console.log('Failed to setup session directory:', error);
       const err = error as Error;
       throw new Error(`Cannot setup session directory: ${err.message}`);
     }
@@ -95,7 +92,7 @@ export class WhatsAppService extends EventEmitter {
         const inactiveTime = now - session.lastActivity.getTime();
         // Remove sessões desconectadas há mais de 1 hora
         if (inactiveTime > 60 * 60 * 1000 && session.status === 'disconnected') {
-          this.logger.info('Cleaning up inactive session', { tenantId });
+          console.log('Cleaning up inactive session', { tenantId });
           this.cleanupSession(tenantId);
         }
       }
@@ -109,7 +106,7 @@ export class WhatsAppService extends EventEmitter {
     message: string;
   }> {
     try {
-      this.logger.info('🚀 [Session Start] Starting WhatsApp session with persistent QR', { 
+      console.log('🚀 [Session Start] Starting WhatsApp session with persistent QR', { 
         tenantId: tenantId.substring(0, 8) + '***',
         timestamp: new Date().toISOString()
       });
@@ -117,7 +114,7 @@ export class WhatsAppService extends EventEmitter {
       // Verificar se já existe uma sessão ativa
       const existingSession = this.sessions.get(tenantId);
       if (existingSession && existingSession.status === 'connected') {
-        this.logger.info('✅ [Session Start] Session already connected', {
+        console.log('✅ [Session Start] Session already connected', {
           tenantId: tenantId.substring(0, 8) + '***',
           sessionId: existingSession.sessionId.substring(0, 8) + '***'
         });
@@ -131,14 +128,14 @@ export class WhatsAppService extends EventEmitter {
 
       // Limpar sessão existente se houver
       if (existingSession) {
-        this.logger.info('🔄 [Session Start] Cleaning existing session', {
+        console.log('🔄 [Session Start] Cleaning existing session', {
           tenantId: tenantId.substring(0, 8) + '***'
         });
         await this.disconnectSession(tenantId);
       }
 
       // OPTIMIZED: Start persistent QR before creating session
-      this.logger.info('🔄 [Session Start] Starting persistent QR service', {
+      console.log('🔄 [Session Start] Starting persistent QR service', {
         tenantId: tenantId.substring(0, 8) + '***'
       });
 
@@ -157,34 +154,38 @@ export class WhatsAppService extends EventEmitter {
 
       this.sessions.set(tenantId, session);
 
-      // OPTIMIZED: Create Baileys connection in parallel with persistent QR
-      const [baileysResult, persistentQR] = await Promise.allSettled([
-        this.createBaileysConnection(tenantId),
-        this.persistentQRService.startPersistentQR(tenantId)
-      ]);
+      // FIXED: Create Baileys connection first, then start persistent QR
+      console.log('🔧 [Session Start] Creating Baileys connection first', {
+        tenantId: tenantId.substring(0, 8) + '***'
+      });
+      
+      await this.createBaileysConnection(tenantId);
+      
+      console.log('✅ [Session Start] Baileys ready, now starting persistent QR', {
+        tenantId: tenantId.substring(0, 8) + '***'
+      });
 
-      // Check results
-      if (baileysResult.status === 'rejected') {
-        this.logger.error('❌ [Session Start] Baileys connection failed', {
-          tenantId: tenantId.substring(0, 8) + '***',
-          error: baileysResult.reason
-        });
-        throw baileysResult.reason;
-      }
-
-      let initialQR: string | null = null;
-      if (persistentQR.status === 'fulfilled' && persistentQR.value) {
-        initialQR = persistentQR.value;
-        session.qrCode = initialQR;
-        session.status = 'qr';
+      // Now start persistent QR service after Baileys is ready
+      try {
+        const persistentQR = await this.persistentQRService.startPersistentQR(tenantId);
         
-        this.logger.info('✅ [Session Start] Persistent QR generated', {
+        if (persistentQR) {
+          session.qrCode = persistentQR;
+          session.status = 'qr';
+          
+          console.log('✅ [Session Start] Persistent QR generated successfully', {
+            tenantId: tenantId.substring(0, 8) + '***',
+            qrLength: persistentQR.length
+          });
+        } else {
+          console.log('ℹ️ [Session Start] No immediate QR, will generate when Baileys emits QR', {
+            tenantId: tenantId.substring(0, 8) + '***'
+          });
+        }
+      } catch (error) {
+        console.log('⚠️ [Session Start] Persistent QR failed, Baileys will handle QR generation', {
           tenantId: tenantId.substring(0, 8) + '***',
-          qrLength: initialQR.length
-        });
-      } else {
-        this.logger.warn('⚠️ [Session Start] Persistent QR failed, using fallback', {
-          tenantId: tenantId.substring(0, 8) + '***'
+          error: error.message
         });
       }
 
@@ -195,7 +196,7 @@ export class WhatsAppService extends EventEmitter {
       };
 
     } catch (error: unknown) {
-      this.logger.error('Failed to start session:', error);
+      console.log('Failed to start session:', error);
       throw error;
     }
   }
@@ -207,7 +208,7 @@ export class WhatsAppService extends EventEmitter {
     }
 
     try {
-      this.logger.info('🔧 [Baileys] Starting optimized connection creation', {
+      console.log('🔧 [Baileys] Starting optimized connection creation', {
         tenantId: tenantId.substring(0, 8) + '***',
         timestamp: new Date().toISOString()
       });
@@ -222,7 +223,7 @@ export class WhatsAppService extends EventEmitter {
 
       // Check results
       if (versionResult.status === 'rejected') {
-        this.logger.error('❌ [Baileys] Version fetch failed', {
+        console.log('❌ [Baileys] Version fetch failed', {
           tenantId: tenantId.substring(0, 8) + '***',
           error: versionResult.reason
         });
@@ -230,7 +231,7 @@ export class WhatsAppService extends EventEmitter {
       }
 
       if (authDirResult.status === 'rejected') {
-        this.logger.error('❌ [Baileys] Auth directory creation failed', {
+        console.log('❌ [Baileys] Auth directory creation failed', {
           tenantId: tenantId.substring(0, 8) + '***',
           error: authDirResult.reason
         });
@@ -238,7 +239,7 @@ export class WhatsAppService extends EventEmitter {
       }
 
       const { version } = versionResult.value;
-      this.logger.info('✅ [Baileys] Version and directory ready', {
+      console.log('✅ [Baileys] Version and directory ready', {
         version,
         tenantId: tenantId.substring(0, 8) + '***',
         authDir: authDir.replace(tenantId, '***')
@@ -248,7 +249,7 @@ export class WhatsAppService extends EventEmitter {
       const authStateStart = Date.now();
       const { state, saveCreds } = await useMultiFileAuthState(authDir);
       
-      this.logger.info('✅ [Baileys] Auth state loaded', {
+      console.log('✅ [Baileys] Auth state loaded', {
         tenantId: tenantId.substring(0, 8) + '***',
         duration: `${Date.now() - authStateStart}ms`,
         hasExistingCreds: !!state.creds.me
@@ -272,7 +273,7 @@ export class WhatsAppService extends EventEmitter {
 
       session.socket = socket;
       
-      this.logger.info('✅ [Baileys] Socket created successfully', {
+      console.log('✅ [Baileys] Socket created successfully', {
         tenantId: tenantId.substring(0, 8) + '***',
         socketDuration: `${Date.now() - socketStart}ms`,
         browser: 'LocAI WhatsApp Service'
@@ -286,7 +287,7 @@ export class WhatsAppService extends EventEmitter {
       // Handler para atualização de credenciais
       socket.ev.on('creds.update', () => {
         saveCreds().catch((error) => {
-          this.logger.error('Failed to save credentials:', error);
+          console.log('Failed to save credentials:', error);
         });
       });
 
@@ -297,10 +298,10 @@ export class WhatsAppService extends EventEmitter {
         }
       });
 
-      (this.logger as any).info({ tenantId }, 'Baileys socket created successfully');
+      console.log({ tenantId }, 'Baileys socket created successfully');
 
     } catch (error: unknown) {
-      this.logger.error('Failed to create Baileys connection:', error);
+      console.log('Failed to create Baileys connection:', error);
       session.status = 'disconnected';
       throw error;
     }
@@ -312,12 +313,7 @@ export class WhatsAppService extends EventEmitter {
 
     const { connection, lastDisconnect, qr } = update;
 
-    this.logger.info('🔄 [Connection] Update received', {
-      tenantId: tenantId.substring(0, 8) + '***',
-      connection,
-      hasQr: !!qr,
-      qrLength: qr?.length
-    });
+    console.log(`🔄 [Connection] Update received for tenant ${tenantId.substring(0, 8)}***: connection=${connection}, hasQr=${!!qr}`);
 
     // OPTIMIZED: QR Code generation with persistent service integration
     if (qr) {
@@ -342,7 +338,7 @@ export class WhatsAppService extends EventEmitter {
 
         this.emit('qr', tenantId, qrDataUrl);
         
-        this.logger.info('✅ [Connection] QR Code generated and integrated', {
+        console.log('✅ [Connection] QR Code generated and integrated', {
           tenantId: tenantId.substring(0, 8) + '***',
           qrLength: qrDataUrl.length,
           generationTime: `${Date.now() - qrGenStart}ms`,
@@ -350,7 +346,7 @@ export class WhatsAppService extends EventEmitter {
         });
 
       } catch (error: unknown) {
-        (this.logger as any).error(error, 'Failed to generate QR code');
+        console.log(error, 'Failed to generate QR code');
         // Usar QR raw como fallback
         session.qrCode = qr;
         session.status = 'qr';
@@ -385,7 +381,7 @@ export class WhatsAppService extends EventEmitter {
 
       this.emit('connected', tenantId, session.phoneNumber);
       
-      this.logger.info('✅ [Connection] WhatsApp connected successfully', {
+      console.log('✅ [Connection] WhatsApp connected successfully', {
         tenantId: tenantId.substring(0, 8) + '***',
         phone: session.phoneNumber?.substring(0, 6) + '***',
         business: session.businessName,
@@ -397,7 +393,7 @@ export class WhatsAppService extends EventEmitter {
     if (connection === 'close') {
       const shouldReconnect = (lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
 
-      (this.logger as any).info({
+      console.log({
         tenantId,
         shouldReconnect,
         reconnectAttempts: session.reconnectAttempts,
@@ -409,7 +405,7 @@ export class WhatsAppService extends EventEmitter {
         session.reconnectAttempts++;
         const delay = Math.min(5000 * Math.pow(2, session.reconnectAttempts - 1), 30000);
 
-        (this.logger as any).info({
+        console.log({
           tenantId,
           attempt: session.reconnectAttempts,
           delay
@@ -417,7 +413,7 @@ export class WhatsAppService extends EventEmitter {
 
         const timer = setTimeout(() => {
           this.createBaileysConnection(tenantId).catch((error) => {
-            this.logger.error('Reconnection failed:', error);
+            console.log('Reconnection failed:', error);
             session.status = 'disconnected';
           });
         }, delay);
@@ -454,7 +450,7 @@ export class WhatsAppService extends EventEmitter {
           type: 'text'
         });
 
-        (this.logger as any).info({
+        console.log({
           tenantId,
           from: message.key.remoteJid?.replace('@s.whatsapp.net', '').substring(0, 6) + '***',
           messageId: message.key.id
@@ -525,7 +521,7 @@ export class WhatsAppService extends EventEmitter {
       const sentMessage = await session.socket.sendMessage(jid, content);
       session.lastActivity = new Date();
 
-      (this.logger as any).info({
+      console.log({
         tenantId,
         to: messageData.to.substring(0, 6) + '***',
         type: messageData.type || 'text',
@@ -538,7 +534,7 @@ export class WhatsAppService extends EventEmitter {
       };
 
     } catch (error: unknown) {
-      (this.logger as any).error(error, 'Failed to send message');
+      console.log(error, 'Failed to send message');
       const err = error as Error;
       return {
         success: false,
@@ -573,7 +569,7 @@ export class WhatsAppService extends EventEmitter {
       session.qrCode = persistentQR;
       session.status = 'qr';
       
-      this.logger.info('🔄 [Status] Updated session with fresh persistent QR', {
+      console.log('🔄 [Status] Updated session with fresh persistent QR', {
         tenantId: tenantId.substring(0, 8) + '***',
         qrLength: persistentQR.length
       });
@@ -597,7 +593,7 @@ export class WhatsAppService extends EventEmitter {
     const session = this.sessions.get(tenantId);
     
     if (!session) {
-      this.logger.warn('⚠️ [QR Request] No session found', {
+      console.log('⚠️ [QR Request] No session found', {
         tenantId: tenantId.substring(0, 8) + '***'
       });
       return {};
@@ -605,14 +601,14 @@ export class WhatsAppService extends EventEmitter {
 
     // Return current QR from session
     if (session.qrCode) {
-      this.logger.info('✅ [QR Request] Returning existing QR', {
+      console.log('✅ [QR Request] Returning existing QR', {
         tenantId: tenantId.substring(0, 8) + '***',
         qrLength: session.qrCode.length
       });
       return { qrCode: session.qrCode };
     }
 
-    this.logger.info('ℹ️ [QR Request] No QR available in session', {
+    console.log('ℹ️ [QR Request] No QR available in session', {
       tenantId: tenantId.substring(0, 8) + '***',
       status: session.status
     });
@@ -651,7 +647,7 @@ export class WhatsAppService extends EventEmitter {
         try {
           await session.socket.logout();
         } catch (error: unknown) {
-          (this.logger as any).warn(error, 'Error during logout');
+          console.log(error, 'Error during logout');
         }
       }
 
@@ -666,12 +662,12 @@ export class WhatsAppService extends EventEmitter {
       await this.clearSessionData(tenantId);
       this.cleanupSession(tenantId);
 
-      (this.logger as any).info({ tenantId }, 'Session disconnected successfully');
+      console.log({ tenantId }, 'Session disconnected successfully');
       
       return { success: true, message: 'Session disconnected' };
 
     } catch (error: unknown) {
-      (this.logger as any).error(error, 'Failed to disconnect session');
+      console.log(error, 'Failed to disconnect session');
       const err = error as Error;
       return { success: false, message: err.message };
     }
@@ -682,10 +678,10 @@ export class WhatsAppService extends EventEmitter {
       const sessionPath = path.join(this.sessionDir, tenantId);
       if (fs.existsSync(sessionPath)) {
         fs.rmSync(sessionPath, { recursive: true, force: true });
-        (this.logger as any).info({ tenantId, path: sessionPath }, 'Session data cleared');
+        console.log({ tenantId, path: sessionPath }, 'Session data cleared');
       }
     } catch (error: unknown) {
-      (this.logger as any).error(error, 'Failed to clear session data');
+      console.log(error, 'Failed to clear session data');
     }
   }
 
@@ -696,12 +692,12 @@ export class WhatsAppService extends EventEmitter {
 
   async disconnectAllSessions(): Promise<void> {
     const tenants = Array.from(this.sessions.keys());
-    (this.logger as any).info({ count: tenants.length }, 'Disconnecting all sessions');
+    console.log({ count: tenants.length }, 'Disconnecting all sessions');
 
     const promises = tenants.map(tenantId => this.disconnectSession(tenantId));
     await Promise.allSettled(promises);
 
-    (this.logger as any).info('All sessions disconnected');
+    console.log('All sessions disconnected');
   }
 
   getActiveSessions(): Array<{

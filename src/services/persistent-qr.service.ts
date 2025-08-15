@@ -25,7 +25,7 @@ export class PersistentQRService {
     private logger: Logger,
     private whatsappService: WhatsAppService
   ) {
-    this.logger.info('🔄 [PersistentQR] Service initialized');
+    console.log('🔄 [PersistentQR] Service initialized');
     
     // Clean expired sessions every 5 minutes
     setInterval(() => this.cleanExpiredSessions(), 5 * 60 * 1000);
@@ -36,9 +36,7 @@ export class PersistentQRService {
    */
   async startPersistentQR(tenantId: string): Promise<string | null> {
     try {
-      this.logger.info('🚀 [PersistentQR] Starting persistent QR management', {
-        tenantId: tenantId.substring(0, 8) + '***'
-      });
+      console.log(`🚀 [PersistentQR] Starting persistent QR management for tenant ${tenantId.substring(0, 8)}***`);
 
       // Initialize session tracking
       const session: QRSession = {
@@ -63,22 +61,16 @@ export class PersistentQRService {
         // Start regeneration cycle
         this.startRegenerationCycle(tenantId);
         
-        this.logger.info('✅ [PersistentQR] Initial QR generated successfully', {
-          tenantId: tenantId.substring(0, 8) + '***',
-          qrLength: initialQR.length
-        });
+        console.log(`✅ [PersistentQR] Initial QR generated successfully for tenant ${tenantId.substring(0, 8)}*** (length: ${initialQR.length})`);
         
         return initialQR;
       }
 
-      this.logger.warn('⚠️ [PersistentQR] Failed to generate initial QR');
+      console.log('⚠️ [PersistentQR] Failed to generate initial QR');
       return null;
 
     } catch (error) {
-      this.logger.error('❌ [PersistentQR] Failed to start persistent QR', {
-        tenantId: tenantId.substring(0, 8) + '***',
-        error: error.message
-      });
+      console.log(`❌ [PersistentQR] Failed to start persistent QR for tenant ${tenantId.substring(0, 8)}***: ${error.message}`);
       return null;
     }
   }
@@ -90,20 +82,14 @@ export class PersistentQRService {
     const session = this.qrSessions.get(tenantId);
     
     if (!session) {
-      this.logger.warn('⚠️ [PersistentQR] No session found for tenant', {
-        tenantId: tenantId.substring(0, 8) + '***'
-      });
+      console.log(`⚠️ [PersistentQR] No session found for tenant ${tenantId.substring(0, 8)}***`);
       return null;
     }
 
     // Check if QR is still valid
     const age = Date.now() - session.lastGenerated;
     if (age > this.QR_LIFETIME && session.status !== 'connected') {
-      this.logger.info('🔄 [PersistentQR] QR expired, triggering regeneration', {
-        tenantId: tenantId.substring(0, 8) + '***',
-        age: `${Math.round(age/1000)}s`,
-        status: session.status
-      });
+      console.log(`🔄 [PersistentQR] QR expired for tenant ${tenantId.substring(0, 8)}***, age: ${Math.round(age/1000)}s, status: ${session.status}`);
       
       // Trigger immediate regeneration
       this.regenerateQR(tenantId);
@@ -125,10 +111,7 @@ export class PersistentQRService {
       // Stop regeneration cycle
       this.stopRegenerationCycle(tenantId);
       
-      this.logger.info('✅ [PersistentQR] Session marked as connected', {
-        tenantId: tenantId.substring(0, 8) + '***',
-        totalRegenerations: session.regenerationCount
-      });
+      console.log(`✅ [PersistentQR] Session marked as connected for tenant ${tenantId.substring(0, 8)}*** (regenerations: ${session.regenerationCount})`);
     }
   }
 
@@ -154,10 +137,7 @@ export class PersistentQRService {
       if (shouldRegenerate) {
         await this.regenerateQR(tenantId);
       } else if (session.regenerationCount >= this.MAX_REGENERATIONS) {
-        this.logger.warn('⚠️ [PersistentQR] Max regenerations reached, stopping cycle', {
-          tenantId: tenantId.substring(0, 8) + '***',
-          regenerationCount: session.regenerationCount
-        });
+        console.log(`⚠️ [PersistentQR] Max regenerations reached for tenant ${tenantId.substring(0, 8)}***, stopping cycle (count: ${session.regenerationCount})`);
         this.stopRegenerationCycle(tenantId);
       }
       
@@ -165,10 +145,7 @@ export class PersistentQRService {
     
     this.regenerationIntervals.set(tenantId, interval);
     
-    this.logger.info('🔄 [PersistentQR] Regeneration cycle started', {
-      tenantId: tenantId.substring(0, 8) + '***',
-      interval: `${this.REGENERATION_INTERVAL/1000}s`
-    });
+    console.log(`🔄 [PersistentQR] Regeneration cycle started for tenant ${tenantId.substring(0, 8)}*** (interval: ${this.REGENERATION_INTERVAL/1000}s)`);
   }
 
   /**
@@ -181,9 +158,7 @@ export class PersistentQRService {
       clearInterval(interval);
       this.regenerationIntervals.delete(tenantId);
       
-      this.logger.info('⏹️ [PersistentQR] Regeneration cycle stopped', {
-        tenantId: tenantId.substring(0, 8) + '***'
-      });
+      console.log(`⏹️ [PersistentQR] Regeneration cycle stopped for tenant ${tenantId.substring(0, 8)}***`);
     }
   }
 
@@ -198,20 +173,14 @@ export class PersistentQRService {
     }
 
     if (session.regenerationCount >= this.MAX_REGENERATIONS) {
-      this.logger.warn('⚠️ [PersistentQR] Max regenerations reached, skipping', {
-        tenantId: tenantId.substring(0, 8) + '***'
-      });
+      console.log(`⚠️ [PersistentQR] Max regenerations reached for tenant ${tenantId.substring(0, 8)}***, skipping`);
       return;
     }
 
     try {
       session.status = 'generating';
       
-      this.logger.info('🔄 [PersistentQR] Starting QR regeneration', {
-        tenantId: tenantId.substring(0, 8) + '***',
-        attempt: session.regenerationCount + 1,
-        maxAttempts: this.MAX_REGENERATIONS
-      });
+      console.log(`🔄 [PersistentQR] Starting QR regeneration for tenant ${tenantId.substring(0, 8)}*** (attempt ${session.regenerationCount + 1}/${this.MAX_REGENERATIONS})`);
 
       const newQR = await this.generateQRCode(tenantId);
       
@@ -221,40 +190,64 @@ export class PersistentQRService {
         session.regenerationCount++;
         session.status = 'available';
         
-        this.logger.info('✅ [PersistentQR] QR regenerated successfully', {
-          tenantId: tenantId.substring(0, 8) + '***',
-          regenerationCount: session.regenerationCount,
-          qrLength: newQR.length
-        });
+        console.log(`✅ [PersistentQR] QR regenerated successfully for tenant ${tenantId.substring(0, 8)}*** (count: ${session.regenerationCount}, length: ${newQR.length})`);
       } else {
         session.status = 'expired';
-        this.logger.error('❌ [PersistentQR] QR regeneration failed');
+        console.log('❌ [PersistentQR] QR regeneration failed');
       }
 
     } catch (error) {
       session.status = 'expired';
-      this.logger.error('❌ [PersistentQR] QR regeneration error', {
-        tenantId: tenantId.substring(0, 8) + '***',
-        error: error.message
-      });
+      console.log(`❌ [PersistentQR] QR regeneration error for tenant ${tenantId.substring(0, 8)}***: ${error.message}`);
     }
   }
 
   /**
-   * Generate QR code via WhatsApp service
+   * FIXED: Generate QR code via WhatsApp service with retry logic
    */
   private async generateQRCode(tenantId: string): Promise<string | null> {
     try {
+      // Wait for Baileys to be ready before attempting QR generation
+      await this.waitForSessionReady(tenantId, 30000); // Wait up to 30s
+      
       // Use WhatsApp service to generate QR
       const result = await this.whatsappService.getSessionQR(tenantId);
       return result?.qrCode || null;
     } catch (error) {
-      this.logger.error('❌ [PersistentQR] QR generation via WhatsApp service failed', {
-        tenantId: tenantId.substring(0, 8) + '***',
-        error: error.message
-      });
+      console.log(`❌ [PersistentQR] QR generation via WhatsApp service failed for tenant ${tenantId.substring(0, 8)}***: ${error.message}`);
       return null;
     }
+  }
+
+  /**
+   * FIXED: Wait for session to be ready before QR generation
+   */
+  private async waitForSessionReady(tenantId: string, maxWait: number = 30000): Promise<void> {
+    const startTime = Date.now();
+    const pollInterval = 1000; // Check every 1s
+    
+    while (Date.now() - startTime < maxWait) {
+      try {
+        const status = await this.whatsappService.getSessionStatus(tenantId);
+        
+        // Session is ready if it has any status (even if no QR yet)
+        if (status && (status.status === 'qr' || status.qrCode)) {
+          console.log(`✅ [PersistentQR] Session ready for QR generation for tenant ${tenantId.substring(0, 8)}*** (wait: ${Date.now() - startTime}ms)`);
+          return;
+        }
+        
+        // Wait before next check
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+        
+      } catch (error) {
+        // Session not ready yet, continue waiting
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+      }
+    }
+    
+    console.log(`⏰ [PersistentQR] Session ready timeout reached for tenant ${tenantId.substring(0, 8)}*** (maxWait: ${maxWait}ms)`);
+    
+    throw new Error('Session not ready within timeout');
   }
 
   /**
@@ -278,10 +271,7 @@ export class PersistentQRService {
     }
     
     if (expiredSessions.length > 0) {
-      this.logger.info('🧹 [PersistentQR] Cleaned expired sessions', {
-        count: expiredSessions.length,
-        sessions: expiredSessions.map(id => id.substring(0, 8) + '***')
-      });
+      console.log(`🧹 [PersistentQR] Cleaned ${expiredSessions.length} expired sessions`);
     }
   }
 
@@ -292,9 +282,7 @@ export class PersistentQRService {
     this.stopRegenerationCycle(tenantId);
     this.qrSessions.delete(tenantId);
     
-    this.logger.info('⏹️ [PersistentQR] Persistent QR stopped', {
-      tenantId: tenantId.substring(0, 8) + '***'
-    });
+    console.log(`⏹️ [PersistentQR] Persistent QR stopped for tenant ${tenantId.substring(0, 8)}***`);
   }
 
   /**
