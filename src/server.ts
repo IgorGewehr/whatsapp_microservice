@@ -14,6 +14,7 @@ import { sessionRoutes } from './routes/session.routes';
 import { messageRoutes } from './routes/message.routes';
 import { webhookRoutes } from './routes/webhook.routes';
 import { StatusService } from './services/status.service';
+import { WebhookService } from './services/webhook.service';
 
 // Configurar logger
 const logger = pino({
@@ -68,6 +69,74 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 const whatsappService = new WhatsAppService(logger);
 const tenantManager = new TenantManager(logger);
 const statusService = new StatusService(logger);
+
+// Inicializar WebhookService para gerenciar webhooks automáticos
+const webhookService = new WebhookService(logger);
+
+// ✅ CONECTAR EVENTOS DO WHATSAPP AO WEBHOOK SERVICE
+// Isso é CRUCIAL para que mensagens sejam enviadas para o LocAI
+whatsappService.on('message', async (tenantId: string, messageData: any) => {
+  try {
+    // Processar mensagem recebida via webhook service
+    await webhookService.processIncomingMessage({
+      tenantId,
+      from: messageData.from,
+      to: messageData.to || '',
+      message: messageData.text || '',
+      messageId: messageData.id || '',
+      timestamp: messageData.timestamp || Date.now(),
+      type: messageData.type || 'text'
+    });
+    
+    (logger as any).info('✅ [Webhook] Mensagem processada e enviada para LocAI', {
+      tenantId: tenantId.substring(0, 8) + '***',
+      from: messageData.from?.substring(0, 6) + '***',
+      messageId: messageData.id
+    });
+    
+  } catch (error) {
+    (logger as any).error('❌ [Webhook] Erro ao processar mensagem', {
+      tenantId: tenantId.substring(0, 8) + '***',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// AUTO-REGISTRAR WEBHOOK DO LOCAI SE CONFIGURADO
+if (config.LOCAI_WEBHOOK_URL) {
+  // Registrar webhook automático para todos os tenants
+  // Isso garante que as mensagens sejam enviadas para o LocAI
+  const autoRegisterWebhook = async (tenantId: string) => {
+    try {
+      await webhookService.registerWebhook(tenantId, {
+        url: config.LOCAI_WEBHOOK_URL!,
+        secret: config.LOCAI_WEBHOOK_SECRET,
+        events: ['message', 'status'],
+        active: true
+      });
+      
+      (logger as any).info('✅ [Webhook] Auto-registrado webhook LocAI', {
+        tenantId: tenantId.substring(0, 8) + '***',
+        url: config.LOCAI_WEBHOOK_URL
+      });
+    } catch (error) {
+      // Ignorar erro se webhook já existe
+      if (!(error instanceof Error && error.message.includes('already exists'))) {
+        (logger as any).warn('⚠️ [Webhook] Erro ao auto-registrar webhook', {
+          tenantId: tenantId.substring(0, 8) + '***',
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
+      }
+    }
+  };
+
+  // Auto-registrar webhook quando sessão for criada
+  whatsappService.on('session_created', autoRegisterWebhook);
+  
+  (logger as any).info('🔗 [Webhook] Sistema de auto-registro configurado', {
+    webhookUrl: config.LOCAI_WEBHOOK_URL
+  });
+}
 
 // Health check
 app.get('/health', async (req, res) => {

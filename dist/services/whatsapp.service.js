@@ -129,6 +129,7 @@ class WhatsAppService extends events_1.EventEmitter {
                 sessionId
             };
             this.sessions.set(tenantId, session);
+            this.emit('session_created', tenantId);
             console.log('🔧 [Session Start] Creating Baileys connection first', {
                 tenantId: tenantId.substring(0, 8) + '***'
             });

@@ -154,6 +154,9 @@ export class WhatsAppService extends EventEmitter {
 
       this.sessions.set(tenantId, session);
 
+      // ✅ EMIT SESSION CREATED EVENT FOR AUTO-WEBHOOK REGISTRATION
+      this.emit('session_created', tenantId);
+
       // FIXED: Create Baileys connection first, then start persistent QR
       console.log('🔧 [Session Start] Creating Baileys connection first', {
         tenantId: tenantId.substring(0, 8) + '***'
