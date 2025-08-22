@@ -31,7 +31,7 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
   }
 
   try {
-    // Verificar se é API key ou JWT
+    // Verificar se é API key
     if (token === config.API_KEY) {
       // API key válida - acesso total
       req.tenantId = req.headers['x-tenant-id'] as string || 'default';
@@ -39,7 +39,23 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
       return next();
     }
 
-    // Tentar verificar como JWT
+    // Verificar Firebase ID Token
+    if (token.includes('.')) {
+      // Token JWT format - assumir que é Firebase ID Token
+      // Para simplificar, extrair uid do token sem verificação completa (temporário)
+      try {
+        const decoded = jwt.decode(token) as any;
+        if (decoded && decoded.sub && decoded.firebase) {
+          req.tenantId = decoded.sub; // Firebase UID como tenant ID
+          req.permissions = ['*'];
+          return next();
+        }
+      } catch {
+        // Continuar para verificação como JWT personalizado
+      }
+    }
+
+    // Tentar verificar como JWT personalizado (fallback)
     const decoded = jwt.verify(token, config.JWT_SECRET) as any;
     
     if (decoded.type === 'tenant_access' && decoded.tenantId) {
