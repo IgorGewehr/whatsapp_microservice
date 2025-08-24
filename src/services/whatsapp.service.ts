@@ -45,6 +45,7 @@ export class WhatsAppService extends EventEmitter {
   private sessionDir: string;
   private reconnectTimers: Map<string, NodeJS.Timeout> = new Map();
   private persistentQRService: PersistentQRService;
+  private processedMessages: Set<string> = new Set(); // Cache de mensagens processadas
 
   constructor(logger: Logger) {
     super();
@@ -61,6 +62,7 @@ export class WhatsAppService extends EventEmitter {
     
     this.ensureSessionDirectory();
     this.startCleanupInterval();
+    this.startMessageCleanup();
     
     console.log(`WhatsApp Service initialized (sessionDir: ${this.sessionDir}, cacheTTL: ${config.CACHE_TTL})`);
   }
@@ -97,6 +99,21 @@ export class WhatsAppService extends EventEmitter {
         }
       }
     }, 30 * 60 * 1000);
+  }
+
+  private startMessageCleanup(): void {
+    // Limpeza de mensagens processadas a cada 5 minutos
+    setInterval(() => {
+      const maxSize = 1000; // Manter apenas as últimas 1000 mensagens
+      if (this.processedMessages.size > maxSize) {
+        console.log(`Cleaning up processed messages cache (size: ${this.processedMessages.size})`);
+        // Converter para array, manter apenas as últimas
+        const messages = Array.from(this.processedMessages);
+        this.processedMessages.clear();
+        messages.slice(-500).forEach(msgId => this.processedMessages.add(msgId));
+        console.log(`Processed messages cache cleaned (new size: ${this.processedMessages.size})`);
+      }
+    }, 5 * 60 * 1000);
   }
 
   async startSession(tenantId: string): Promise<{
@@ -437,27 +454,55 @@ export class WhatsAppService extends EventEmitter {
 
   private async handleIncomingMessages(tenantId: string, messages: proto.IWebMessageInfo[]): Promise<void> {
     for (const message of messages) {
-      if (!message.key.fromMe && message.message) {
+      if (!message.key.fromMe && message.message && message.key.id) {
+        // ===== FILTRO ANTI-DUPLICAÇÃO =====
+        const messageKey = `${tenantId}_${message.key.remoteJid}_${message.key.id}`;
+        
+        if (this.processedMessages.has(messageKey)) {
+          console.log('🔄 [WhatsApp] Message already processed, skipping', {
+            tenantId: tenantId.substring(0, 8) + '***',
+            messageId: message.key.id?.substring(0, 8) + '***',
+            from: message.key.remoteJid?.replace('@s.whatsapp.net', '').substring(0, 6) + '***'
+          });
+          continue; // Pular mensagem duplicada
+        }
+        
+        // Marcar mensagem como processada ANTES de processar
+        this.processedMessages.add(messageKey);
+
         const session = this.sessions.get(tenantId);
         if (session) {
           session.lastActivity = new Date();
         }
+
+        const messageText = message.message.conversation || 
+                           message.message.extendedTextMessage?.text || '';
+        
+        // Filtrar mensagens vazias
+        if (!messageText.trim()) {
+          console.log('⚠️ [WhatsApp] Empty message, skipping', {
+            tenantId: tenantId.substring(0, 8) + '***',
+            messageId: message.key.id?.substring(0, 8) + '***'
+          });
+          continue;
+        }
+
+        console.log('📨 [WhatsApp] Processing new message', {
+          tenantId: tenantId.substring(0, 8) + '***',
+          from: message.key.remoteJid?.replace('@s.whatsapp.net', '').substring(0, 6) + '***',
+          messageId: message.key.id?.substring(0, 8) + '***',
+          messageLength: messageText.length,
+          timestamp: message.messageTimestamp
+        });
 
         // Emitir evento para webhook
         this.emit('message', tenantId, {
           from: message.key.remoteJid?.replace('@s.whatsapp.net', ''),
           id: message.key.id,
           timestamp: message.messageTimestamp,
-          text: message.message.conversation || 
-                message.message.extendedTextMessage?.text || '',
+          text: messageText,
           type: 'text'
         });
-
-        console.log({
-          tenantId,
-          from: message.key.remoteJid?.replace('@s.whatsapp.net', '').substring(0, 6) + '***',
-          messageId: message.key.id
-        }, 'Message received');
       }
     }
   }
