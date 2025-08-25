@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//mnt/c/Users/Administrador/Documents/Projetos/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

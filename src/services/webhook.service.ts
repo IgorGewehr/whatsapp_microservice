@@ -201,8 +201,9 @@ export class WebhookService {
 
       const response: AxiosResponse = await axios.post(webhook.url, payload, {
         headers,
-        timeout: 30000, // 30 segundos
-        maxRedirects: 3
+        timeout: 8000, // REDUZIDO: 8 segundos para evitar duplicações por timeout
+        maxRedirects: 2, // REDUZIDO: menos redirects
+        validateStatus: (status) => status < 500 // Considerar 4xx como sucesso para não retentar
       });
 
       // Atualizar estatísticas de sucesso
@@ -238,31 +239,24 @@ export class WebhookService {
         retryCount
       });
 
-      // Implementar retry com backoff exponencial
-      const maxRetries = 3;
-      if (retryCount < maxRetries) {
-        const delay = Math.min(1000 * Math.pow(2, retryCount), 30000); // Max 30s
-        
-        setTimeout(() => {
-          this.sendWebhook(webhook, payload, tenantId, retryCount + 1);
-        }, delay);
-        
-        this.logger.info?.('Webhook retry scheduled', {
+      // RETRY DESABILITADO TEMPORARIAMENTE PARA EVITAR MÚLTIPLAS MENSAGENS
+      // TODO: Reativar retry com sistema mais inteligente
+      this.logger.warn?.('Webhook failed - retry disabled to prevent message duplication', {
+        tenantId,
+        webhookId: webhook.id,
+        error: error.message,
+        status: error.response?.status,
+        retryCount
+      });
+      
+      // Desativar webhook após muitas falhas consecutivas
+      if (webhook.errorCount && webhook.errorCount > 5) {
+        webhook.active = false;
+        this.logger.warn?.('Webhook deactivated due to consecutive failures', {
           tenantId,
           webhookId: webhook.id,
-          retryCount: retryCount + 1,
-          delay
+          errorCount: webhook.errorCount
         });
-      } else {
-        // Desativar webhook após muitas falhas consecutivas
-        if (webhook.errorCount && webhook.errorCount > 10) {
-          webhook.active = false;
-          this.logger.warn?.('Webhook deactivated due to consecutive failures', {
-            tenantId,
-            webhookId: webhook.id,
-            errorCount: webhook.errorCount
-          });
-        }
       }
     }
   }
@@ -343,7 +337,8 @@ export class WebhookService {
 
       const response = await axios.post(webhook.url, testPayload, {
         headers,
-        timeout: 10000 // 10 segundos para teste
+        timeout: 5000, // REDUZIDO: 5 segundos para teste
+        validateStatus: (status) => status < 500
       });
 
       const responseTime = Date.now() - startTime;

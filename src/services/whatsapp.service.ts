@@ -102,18 +102,18 @@ export class WhatsAppService extends EventEmitter {
   }
 
   private startMessageCleanup(): void {
-    // Limpeza de mensagens processadas a cada 5 minutos
+    // AUMENTADO: Limpeza de mensagens processadas a cada 15 minutos para evitar reprocessamento
     setInterval(() => {
-      const maxSize = 1000; // Manter apenas as últimas 1000 mensagens
+      const maxSize = 2000; // AUMENTADO: Manter 2000 mensagens por mais tempo
       if (this.processedMessages.size > maxSize) {
         console.log(`Cleaning up processed messages cache (size: ${this.processedMessages.size})`);
-        // Converter para array, manter apenas as últimas
+        // Converter para array, manter apenas as últimas 1500 (mais conservador)
         const messages = Array.from(this.processedMessages);
         this.processedMessages.clear();
-        messages.slice(-500).forEach(msgId => this.processedMessages.add(msgId));
+        messages.slice(-1500).forEach(msgId => this.processedMessages.add(msgId));
         console.log(`Processed messages cache cleaned (new size: ${this.processedMessages.size})`);
       }
-    }, 5 * 60 * 1000);
+    }, 15 * 60 * 1000); // AUMENTADO: 15 minutos
   }
 
   async startSession(tenantId: string): Promise<{
@@ -454,56 +454,76 @@ export class WhatsAppService extends EventEmitter {
 
   private async handleIncomingMessages(tenantId: string, messages: proto.IWebMessageInfo[]): Promise<void> {
     for (const message of messages) {
-      if (!message.key.fromMe && message.message && message.key.id) {
-        // ===== FILTRO ANTI-DUPLICAÇÃO =====
-        const messageKey = `${tenantId}_${message.key.remoteJid}_${message.key.id}`;
-        
-        if (this.processedMessages.has(messageKey)) {
-          console.log('🔄 [WhatsApp] Message already processed, skipping', {
-            tenantId: tenantId.substring(0, 8) + '***',
-            messageId: message.key.id?.substring(0, 8) + '***',
-            from: message.key.remoteJid?.replace('@s.whatsapp.net', '').substring(0, 6) + '***'
-          });
-          continue; // Pular mensagem duplicada
-        }
-        
-        // Marcar mensagem como processada ANTES de processar
-        this.processedMessages.add(messageKey);
-
-        const session = this.sessions.get(tenantId);
-        if (session) {
-          session.lastActivity = new Date();
-        }
-
-        const messageText = message.message.conversation || 
-                           message.message.extendedTextMessage?.text || '';
-        
-        // Filtrar mensagens vazias
-        if (!messageText.trim()) {
-          console.log('⚠️ [WhatsApp] Empty message, skipping', {
-            tenantId: tenantId.substring(0, 8) + '***',
-            messageId: message.key.id?.substring(0, 8) + '***'
-          });
-          continue;
-        }
-
-        console.log('📨 [WhatsApp] Processing new message', {
+      // FILTRO REFORÇADO: Ignorar mensagens próprias e validar estrutura
+      if (message.key.fromMe) {
+        console.log('🤖 [WhatsApp] Ignoring own message', {
           tenantId: tenantId.substring(0, 8) + '***',
-          from: message.key.remoteJid?.replace('@s.whatsapp.net', '').substring(0, 6) + '***',
-          messageId: message.key.id?.substring(0, 8) + '***',
-          messageLength: messageText.length,
-          timestamp: message.messageTimestamp
+          messageId: message.key.id?.substring(0, 8) + '***'
         });
-
-        // Emitir evento para webhook
-        this.emit('message', tenantId, {
-          from: message.key.remoteJid?.replace('@s.whatsapp.net', ''),
-          id: message.key.id,
-          timestamp: message.messageTimestamp,
-          text: messageText,
-          type: 'text'
-        });
+        continue;
       }
+      
+      if (!message.message || !message.key.id || !message.key.remoteJid) {
+        console.log('⚠️ [WhatsApp] Invalid message structure, skipping', {
+          tenantId: tenantId.substring(0, 8) + '***',
+          hasMessage: !!message.message,
+          hasId: !!message.key.id,
+          hasRemoteJid: !!message.key.remoteJid
+        });
+        continue;
+      }
+
+      // ===== FILTRO ANTI-DUPLICAÇÃO MELHORADO =====
+      const messageText = message.message.conversation || 
+                         message.message.extendedTextMessage?.text || '';
+      const messageKey = `${tenantId}_${message.key.remoteJid}_${message.key.id}_${message.messageTimestamp}`;
+      const contentHash = `${tenantId}_${message.key.remoteJid}_${messageText.trim().substring(0, 50)}_${Math.floor((message.messageTimestamp || 0) / 60000)}`; // Hash por minuto
+      
+      // Verificar duplicação por ID E por conteúdo
+      if (this.processedMessages.has(messageKey) || this.processedMessages.has(contentHash)) {
+        console.log('🔄 [WhatsApp] Message already processed (ID or content), skipping', {
+          tenantId: tenantId.substring(0, 8) + '***',
+          messageId: message.key.id?.substring(0, 8) + '***',
+          from: message.key.remoteJid?.replace('@s.whatsapp.net', '').substring(0, 6) + '***',
+          duplicateType: this.processedMessages.has(messageKey) ? 'ID' : 'CONTENT'
+        });
+        continue; // Pular mensagem duplicada
+      }
+      
+      // Marcar mensagem como processada ANTES de processar (dupla proteção)
+      this.processedMessages.add(messageKey);
+      this.processedMessages.add(contentHash);
+
+      const session = this.sessions.get(tenantId);
+      if (session) {
+        session.lastActivity = new Date();
+      }
+      
+      // Filtrar mensagens vazias
+      if (!messageText.trim()) {
+        console.log('⚠️ [WhatsApp] Empty message, skipping', {
+          tenantId: tenantId.substring(0, 8) + '***',
+          messageId: message.key.id?.substring(0, 8) + '***'
+        });
+        continue;
+      }
+
+      console.log('📨 [WhatsApp] Processing new message', {
+        tenantId: tenantId.substring(0, 8) + '***',
+        from: message.key.remoteJid?.replace('@s.whatsapp.net', '').substring(0, 6) + '***',
+        messageId: message.key.id?.substring(0, 8) + '***',
+        messageLength: messageText.length,
+        timestamp: message.messageTimestamp
+      });
+
+      // Emitir evento para webhook
+      this.emit('message', tenantId, {
+        from: message.key.remoteJid?.replace('@s.whatsapp.net', ''),
+        id: message.key.id,
+        timestamp: message.messageTimestamp,
+        text: messageText,
+        type: 'text'
+      });
     }
   }
 
