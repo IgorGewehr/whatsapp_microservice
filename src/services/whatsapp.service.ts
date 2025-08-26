@@ -32,10 +32,18 @@ export interface WhatsAppSession {
 export interface MessageData {
   to: string;
   message: string;
-  type?: 'text' | 'image' | 'video' | 'document';
+  type?: 'text' | 'image' | 'video' | 'document' | 'media';
   mediaUrl?: string;
+  mediaUrls?: string[]; // Para múltiplas mídias
+  mediaType?: 'image' | 'video' | 'document'; // Tipo das mídias quando type="media"
+  mediaCount?: number; // Quantidade de mídias
   caption?: string;
   fileName?: string;
+}
+
+interface MessageQueue {
+  messages: proto.IWebMessageInfo[];
+  timeout: NodeJS.Timeout | null;
 }
 
 export class WhatsAppService extends EventEmitter {
@@ -46,6 +54,7 @@ export class WhatsAppService extends EventEmitter {
   private reconnectTimers: Map<string, NodeJS.Timeout> = new Map();
   private persistentQRService: PersistentQRService;
   private processedMessages: Set<string> = new Set(); // Cache de mensagens processadas
+  private messageQueues: Map<string, MessageQueue> = new Map(); // Filas de mensagens por cliente
 
   constructor(logger: Logger) {
     super();
@@ -516,20 +525,116 @@ export class WhatsAppService extends EventEmitter {
         timestamp: message.messageTimestamp
       });
 
-      // Emitir evento para webhook
-      this.emit('message', tenantId, {
-        from: message.key.remoteJid?.replace('@s.whatsapp.net', ''),
-        id: message.key.id,
-        timestamp: message.messageTimestamp,
-        text: messageText,
-        type: 'text'
+      // 🚀 NOVO SISTEMA DE FILA COM DEBOUNCE
+      await this.addToMessageQueue(tenantId, message);
+    }
+  }
+
+  private async addToMessageQueue(tenantId: string, message: proto.IWebMessageInfo): Promise<void> {
+    const clientPhone = message.key.remoteJid!; // Já validamos que existe
+    const queueKey = `${tenantId}_${clientPhone}`;
+    
+    // Buscar ou criar fila para este cliente
+    let queue = this.messageQueues.get(queueKey);
+    if (!queue) {
+      queue = {
+        messages: [],
+        timeout: null
+      };
+      this.messageQueues.set(queueKey, queue);
+      
+      console.log('🆕 [Queue] Created new message queue', {
+        tenantId: tenantId.substring(0, 8) + '***',
+        clientPhone: clientPhone.replace('@s.whatsapp.net', '').substring(0, 6) + '***'
       });
     }
+
+    // Adicionar mensagem à fila
+    queue.messages.push(message);
+    
+    console.log('➕ [Queue] Added message to queue', {
+      tenantId: tenantId.substring(0, 8) + '***',
+      clientPhone: clientPhone.replace('@s.whatsapp.net', '').substring(0, 6) + '***',
+      queueSize: queue.messages.length
+    });
+
+    // Cancelar timer anterior se existir
+    if (queue.timeout) {
+      clearTimeout(queue.timeout);
+    }
+
+    // Criar novo timer de 5 segundos (debounce)
+    queue.timeout = setTimeout(async () => {
+      await this.processMessageQueue(tenantId, clientPhone, queueKey);
+    }, 5000);
+    
+    console.log('⏰ [Queue] Reset debounce timer (5s)', {
+      tenantId: tenantId.substring(0, 8) + '***',
+      clientPhone: clientPhone.replace('@s.whatsapp.net', '').substring(0, 6) + '***'
+    });
+  }
+
+  private async processMessageQueue(tenantId: string, clientPhone: string, queueKey: string): Promise<void> {
+    const queue = this.messageQueues.get(queueKey);
+    if (!queue || queue.messages.length === 0) {
+      console.log('⚠️ [Queue] No messages to process', {
+        tenantId: tenantId.substring(0, 8) + '***',
+        clientPhone: clientPhone.replace('@s.whatsapp.net', '').substring(0, 6) + '***'
+      });
+      return;
+    }
+
+    console.log('🔥 [Queue] Processing message queue', {
+      tenantId: tenantId.substring(0, 8) + '***',
+      clientPhone: clientPhone.replace('@s.whatsapp.net', '').substring(0, 6) + '***',
+      messageCount: queue.messages.length
+    });
+
+    // Extrair textos de todas as mensagens e consolidar
+    const consolidatedTexts: string[] = [];
+    const firstMessage = queue.messages[0];
+    
+    for (const message of queue.messages) {
+      const messageText = message.message?.conversation || 
+                         message.message?.extendedTextMessage?.text || '';
+      if (messageText.trim()) {
+        consolidatedTexts.push(messageText.trim());
+      }
+    }
+
+    // Juntar todas as mensagens em uma só
+    const consolidatedMessage = consolidatedTexts.join(' ');
+    
+    console.log('📤 [Queue] Sending consolidated message', {
+      tenantId: tenantId.substring(0, 8) + '***',
+      clientPhone: clientPhone.replace('@s.whatsapp.net', '').substring(0, 6) + '***',
+      originalMessages: queue.messages.length,
+      consolidatedLength: consolidatedMessage.length
+    });
+
+    // Emitir evento consolidado para webhook
+    this.emit('message', tenantId, {
+      from: clientPhone.replace('@s.whatsapp.net', ''),
+      id: firstMessage.key.id,
+      timestamp: firstMessage.messageTimestamp,
+      text: consolidatedMessage,
+      type: 'text',
+      consolidated: true, // Flag para indicar mensagem consolidada
+      originalCount: queue.messages.length // Quantas mensagens originais foram consolidadas
+    });
+
+    // Limpar fila
+    this.messageQueues.delete(queueKey);
+    
+    console.log('✅ [Queue] Queue processed and cleared', {
+      tenantId: tenantId.substring(0, 8) + '***',
+      clientPhone: clientPhone.replace('@s.whatsapp.net', '').substring(0, 6) + '***'
+    });
   }
 
   async sendMessage(tenantId: string, messageData: MessageData): Promise<{
     success: boolean;
-    messageId?: string;
+    messageId?: string | string[];
     error?: string;
   }> {
     try {
@@ -542,10 +647,16 @@ export class WhatsAppService extends EventEmitter {
       }
 
       const jid = messageData.to.includes('@') ? messageData.to : `${messageData.to}@s.whatsapp.net`;
+
+      // 🚀 NOVO: Suporte a múltiplas mídias
+      if (messageData.type === 'media' && messageData.mediaUrls && messageData.mediaUrls.length > 0) {
+        return await this.sendMultipleMedia(session, jid, messageData, tenantId);
+      }
+
+      // Lógica original para mídia única
       let content: any;
 
       if (messageData.type === 'image' && messageData.mediaUrl) {
-        // Baixar e enviar imagem
         const response = await fetch(messageData.mediaUrl);
         if (!response.ok) {
           throw new Error(`Failed to fetch image: ${response.statusText}`);
@@ -557,7 +668,6 @@ export class WhatsAppService extends EventEmitter {
           caption: messageData.caption || messageData.message
         };
       } else if (messageData.type === 'video' && messageData.mediaUrl) {
-        // Baixar e enviar vídeo
         const response = await fetch(messageData.mediaUrl);
         if (!response.ok) {
           throw new Error(`Failed to fetch video: ${response.statusText}`);
@@ -569,7 +679,6 @@ export class WhatsAppService extends EventEmitter {
           caption: messageData.caption || messageData.message
         };
       } else if (messageData.type === 'document' && messageData.mediaUrl) {
-        // Baixar e enviar documento
         const response = await fetch(messageData.mediaUrl);
         if (!response.ok) {
           throw new Error(`Failed to fetch document: ${response.statusText}`);
@@ -582,7 +691,6 @@ export class WhatsAppService extends EventEmitter {
           caption: messageData.caption || messageData.message
         };
       } else {
-        // Mensagem de texto
         content = { text: messageData.message };
       }
 
@@ -603,6 +711,118 @@ export class WhatsAppService extends EventEmitter {
 
     } catch (error: unknown) {
       console.log(error, 'Failed to send message');
+      const err = error as Error;
+      return {
+        success: false,
+        error: err.message
+      };
+    }
+  }
+
+  private async sendMultipleMedia(
+    session: WhatsAppSession,
+    jid: string,
+    messageData: MessageData,
+    tenantId: string
+  ): Promise<{
+    success: boolean;
+    messageId?: string[];
+    error?: string;
+  }> {
+    try {
+      const messageIds: string[] = [];
+      const mediaUrls = messageData.mediaUrls || [];
+      const mediaType = messageData.mediaType || 'image';
+
+      console.log('📎 [Multiple Media] Sending multiple media files', {
+        tenantId: tenantId.substring(0, 8) + '***',
+        to: messageData.to.substring(0, 6) + '***',
+        mediaCount: mediaUrls.length,
+        mediaType
+      });
+
+      // Enviar texto primeiro se houver
+      if (messageData.message && messageData.message.trim()) {
+        const textMessage = await session.socket!.sendMessage(jid, {
+          text: messageData.message
+        });
+        if (textMessage?.key?.id) {
+          messageIds.push(textMessage.key.id);
+        }
+        
+        // Pequena pausa entre texto e mídias
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
+      // Enviar cada mídia sequencialmente
+      for (let i = 0; i < mediaUrls.length; i++) {
+        const mediaUrl = mediaUrls[i];
+        
+        console.log('🖼️ [Multiple Media] Sending media file', {
+          tenantId: tenantId.substring(0, 8) + '***',
+          index: i + 1,
+          total: mediaUrls.length,
+          mediaType
+        });
+
+        try {
+          const response = await fetch(mediaUrl);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch media ${i + 1}: ${response.statusText}`);
+          }
+          const buffer = await response.arrayBuffer();
+
+          let content: any;
+          if (mediaType === 'image') {
+            content = {
+              image: Buffer.from(buffer),
+              caption: i === 0 ? messageData.caption : undefined // Caption apenas na primeira
+            };
+          } else if (mediaType === 'video') {
+            content = {
+              video: Buffer.from(buffer),
+              caption: i === 0 ? messageData.caption : undefined
+            };
+          } else if (mediaType === 'document') {
+            content = {
+              document: Buffer.from(buffer),
+              fileName: messageData.fileName || `document_${i + 1}`,
+              caption: i === 0 ? messageData.caption : undefined
+            };
+          }
+
+          const sentMessage = await session.socket!.sendMessage(jid, content);
+          if (sentMessage?.key?.id) {
+            messageIds.push(sentMessage.key.id);
+          }
+
+          // Pausa entre mídias para evitar spam
+          if (i < mediaUrls.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+
+        } catch (mediaError: unknown) {
+          console.log(`Failed to send media ${i + 1}:`, mediaError);
+          // Continuar com as próximas mídias mesmo se uma falhar
+        }
+      }
+
+      session.lastActivity = new Date();
+
+      console.log('✅ [Multiple Media] All media sent', {
+        tenantId: tenantId.substring(0, 8) + '***',
+        to: messageData.to.substring(0, 6) + '***',
+        sentCount: messageIds.length,
+        totalRequested: mediaUrls.length + (messageData.message ? 1 : 0)
+      });
+
+      return {
+        success: true,
+        messageId: messageIds
+      };
+
+    } catch (error: unknown) {
+      console.log('Failed to send multiple media:', error);
       const err = error as Error;
       return {
         success: false,
@@ -756,6 +976,28 @@ export class WhatsAppService extends EventEmitter {
   private cleanupSession(tenantId: string): void {
     this.sessions.delete(tenantId);
     this.cache.del(`qr_${tenantId}`);
+    
+    // 🧹 Limpar filas de mensagens pendentes desta sessão
+    const keysToDelete: string[] = [];
+    for (const [queueKey, queue] of this.messageQueues.entries()) {
+      if (queueKey.startsWith(`${tenantId}_`)) {
+        // Cancelar timer pendente se houver
+        if (queue.timeout) {
+          clearTimeout(queue.timeout);
+        }
+        keysToDelete.push(queueKey);
+      }
+    }
+    
+    // Remover filas
+    keysToDelete.forEach(key => this.messageQueues.delete(key));
+    
+    if (keysToDelete.length > 0) {
+      console.log('🧹 [Cleanup] Cleared message queues', {
+        tenantId: tenantId.substring(0, 8) + '***',
+        clearedQueues: keysToDelete.length
+      });
+    }
   }
 
   async disconnectAllSessions(): Promise<void> {
