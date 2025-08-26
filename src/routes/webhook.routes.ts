@@ -235,16 +235,14 @@ export function webhookRoutes(whatsappService: WhatsAppService, tenantManager: T
   router.get('/stats/:tenantId', 
     handleAsync(async (req, res) => {
       const { tenantId } = req.params;
-      const { period = '24h' } = req.query;
       
       try {
-        const stats = await webhookService.getWebhookStats(tenantId, period as string);
+        const stats = await webhookService.getWebhookStats(tenantId);
         
         res.json({
           success: true,
           data: {
             tenantId,
-            period,
             stats
           },
           timestamp: new Date().toISOString()
@@ -255,6 +253,64 @@ export function webhookRoutes(whatsappService: WhatsAppService, tenantManager: T
         res.status(500).json({
           success: false,
           error: 'Failed to get webhook stats',
+          message: err.message,
+          timestamp: new Date().toISOString()
+        });
+      }
+    })
+  );
+
+  // 🔴 NOVO: Debug do cache de mensagens enviadas
+  router.get('/debug/cache', 
+    handleAsync(async (req, res) => {
+      try {
+        const cache = await webhookService.getSentMessagesCache();
+        const summary = await webhookService.getWebhookSummary();
+        
+        res.json({
+          success: true,
+          data: {
+            summary,
+            recentMessages: cache.slice(0, 20), // Últimas 20 mensagens
+            totalCacheSize: cache.length
+          },
+          timestamp: new Date().toISOString()
+        });
+        
+      } catch (error: unknown) {
+        const err = error as Error;
+        res.status(500).json({
+          success: false,
+          error: 'Failed to get debug info',
+          message: err.message,
+          timestamp: new Date().toISOString()
+        });
+      }
+    })
+  );
+
+  // 🔴 NOVO: Limpar cache manualmente (para debugging)
+  router.post('/debug/clear-cache', 
+    handleAsync(async (req, res) => {
+      try {
+        // Limpar cache de mensagens enviadas
+        const clearedCount = (webhookService as any).sentMessages.size;
+        (webhookService as any).sentMessages.clear();
+        
+        res.json({
+          success: true,
+          message: 'Cache cleared successfully',
+          data: {
+            clearedCount
+          },
+          timestamp: new Date().toISOString()
+        });
+        
+      } catch (error: unknown) {
+        const err = error as Error;
+        res.status(500).json({
+          success: false,
+          error: 'Failed to clear cache',
           message: err.message,
           timestamp: new Date().toISOString()
         });
