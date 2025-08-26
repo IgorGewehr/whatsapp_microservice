@@ -563,12 +563,12 @@ export class WhatsAppService extends EventEmitter {
       clearTimeout(queue.timeout);
     }
 
-    // Criar novo timer de 5 segundos (debounce)
+    // Criar novo timer de 12 segundos (debounce)
     queue.timeout = setTimeout(async () => {
       await this.processMessageQueue(tenantId, clientPhone, queueKey);
-    }, 5000);
+    }, 12000);
     
-    console.log('⏰ [Queue] Reset debounce timer (5s)', {
+    console.log('⏰ [Queue] Reset debounce timer (12s)', {
       tenantId: tenantId.substring(0, 8) + '***',
       clientPhone: clientPhone.replace('@s.whatsapp.net', '').substring(0, 6) + '***'
     });
