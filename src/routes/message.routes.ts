@@ -59,7 +59,9 @@ const sendMessageSchema = Joi.object({
   message: Joi.string().required().max(4096).messages({
     'string.max': 'Message cannot exceed 4096 characters'
   }),
-  type: Joi.string().valid('text', 'image', 'video', 'document').default('text'),
+  type: Joi.string().valid('text', 'image', 'video', 'document', 'media').default('text'),
+  mediaUrls: Joi.array().items(Joi.string().uri()).optional(),
+  mediaType: Joi.string().valid('image', 'video', 'document').optional(),
   caption: Joi.string().max(1024).optional(),
   fileName: Joi.string().max(255).optional()
 });
@@ -68,7 +70,9 @@ const sendBulkMessageSchema = Joi.object({
   messages: Joi.array().items(Joi.object({
     to: Joi.string().required().pattern(/^\+?[1-9]\d{10,14}$/),
     message: Joi.string().required().max(4096),
-    type: Joi.string().valid('text', 'image', 'video', 'document').default('text'),
+    type: Joi.string().valid('text', 'image', 'video', 'document', 'media').default('text'),
+    mediaUrls: Joi.array().items(Joi.string().uri()).optional(),
+    mediaType: Joi.string().valid('image', 'video', 'document').optional(),
     caption: Joi.string().max(1024).optional(),
     delay: Joi.number().min(1000).max(60000).optional() // Delay entre mensagens (1s-60s)
   })).min(1).max(50).required().messages({
