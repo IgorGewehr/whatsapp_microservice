@@ -85,7 +85,8 @@ whatsappService.on('message', async (tenantId: string, messageData: any) => {
       message: messageData.text || '',
       messageId: messageData.id || '',
       timestamp: messageData.timestamp || Date.now(),
-      type: messageData.type || 'text'
+      type: messageData.type || 'text',
+      messageReplied: messageData.messageReplied
     });
     
     (logger as any).info('✅ [Webhook] Mensagem processada e enviada para LocAI', {

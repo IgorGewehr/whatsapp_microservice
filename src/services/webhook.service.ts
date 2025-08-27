@@ -24,6 +24,7 @@ export interface IncomingMessage {
   type?: string;
   mediaUrl?: string;
   caption?: string;
+  messageReplied?: string;
 }
 
 export interface StatusChange {
@@ -207,7 +208,8 @@ export class WebhookService {
         messageId: message.messageId,
         type: message.type || 'text',
         mediaUrl: message.mediaUrl,
-        caption: message.caption
+        caption: message.caption,
+        ...(message.messageReplied && { messageReplied: message.messageReplied })
       }
     };
 
