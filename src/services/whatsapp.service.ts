@@ -43,6 +43,7 @@ export interface MessageData {
 
 interface MessageQueue {
   messages: proto.IWebMessageInfo[];
+  repliedMessages: (string | undefined)[]; // Armazenar messageReplied para cada mensagem
   timeout: NodeJS.Timeout | null;
 }
 
@@ -485,6 +486,9 @@ export class WhatsAppService extends EventEmitter {
       // ===== FILTRO ANTI-DUPLICAÇÃO MELHORADO =====
       const messageText = message.message.conversation || 
                          message.message.extendedTextMessage?.text || '';
+      
+      // ===== EXTRAÇÃO DE MENSAGEM RESPONDIDA =====
+      const messageReplied = this.extractRepliedMessage(message);
       const messageKey = `${tenantId}_${message.key.remoteJid}_${message.key.id}_${message.messageTimestamp}`;
       const contentHash = `${tenantId}_${message.key.remoteJid}_${messageText.trim().substring(0, 50)}_${Math.floor((message.messageTimestamp || 0) / 60000)}`; // Hash por minuto
       
@@ -526,11 +530,11 @@ export class WhatsAppService extends EventEmitter {
       });
 
       // 🚀 NOVO SISTEMA DE FILA COM DEBOUNCE
-      await this.addToMessageQueue(tenantId, message);
+      await this.addToMessageQueue(tenantId, message, messageReplied);
     }
   }
 
-  private async addToMessageQueue(tenantId: string, message: proto.IWebMessageInfo): Promise<void> {
+  private async addToMessageQueue(tenantId: string, message: proto.IWebMessageInfo, messageReplied?: string): Promise<void> {
     const clientPhone = message.key.remoteJid!; // Já validamos que existe
     const queueKey = `${tenantId}_${clientPhone}`;
     
@@ -539,6 +543,7 @@ export class WhatsAppService extends EventEmitter {
     if (!queue) {
       queue = {
         messages: [],
+        repliedMessages: [],
         timeout: null
       };
       this.messageQueues.set(queueKey, queue);
@@ -549,8 +554,9 @@ export class WhatsAppService extends EventEmitter {
       });
     }
 
-    // Adicionar mensagem à fila
+    // Adicionar mensagem e messageReplied à fila
     queue.messages.push(message);
+    queue.repliedMessages.push(messageReplied);
     
     console.log('➕ [Queue] Added message to queue', {
       tenantId: tenantId.substring(0, 8) + '***',
@@ -612,8 +618,11 @@ export class WhatsAppService extends EventEmitter {
       consolidatedLength: consolidatedMessage.length
     });
 
+    // Buscar messageReplied da primeira mensagem que tem reply
+    const firstReply = queue.repliedMessages.find(reply => reply !== undefined);
+    
     // Emitir evento consolidado para webhook
-    this.emit('message', tenantId, {
+    const eventData: any = {
       from: clientPhone.replace('@s.whatsapp.net', ''),
       id: firstMessage.key.id,
       timestamp: firstMessage.messageTimestamp,
@@ -621,7 +630,14 @@ export class WhatsAppService extends EventEmitter {
       type: 'text',
       consolidated: true, // Flag para indicar mensagem consolidada
       originalCount: queue.messages.length // Quantas mensagens originais foram consolidadas
-    });
+    };
+    
+    // Adicionar messageReplied se existir
+    if (firstReply) {
+      eventData.messageReplied = firstReply;
+    }
+    
+    this.emit('message', tenantId, eventData);
 
     // Limpar fila
     this.messageQueues.delete(queueKey);
@@ -1013,5 +1029,41 @@ export class WhatsAppService extends EventEmitter {
       phoneNumber: session.phoneNumber || undefined,
       lastActivity: session.lastActivity.toISOString()
     }));
+  }
+
+  private extractRepliedMessage(message: proto.IWebMessageInfo): string | undefined {
+    // Verificar se existe contextInfo com mensagem citada
+    const contextInfo = message.message?.extendedTextMessage?.contextInfo;
+    if (!contextInfo?.quotedMessage) {
+      return undefined;
+    }
+
+    // Extrair texto da mensagem citada, ignorando mídias
+    const quotedMessage = contextInfo.quotedMessage;
+    
+    // Verificar diferentes tipos de mensagem citada
+    if (quotedMessage.conversation) {
+      return quotedMessage.conversation;
+    }
+    
+    if (quotedMessage.extendedTextMessage?.text) {
+      return quotedMessage.extendedTextMessage.text;
+    }
+    
+    // Para mensagens de mídia, retornar apenas o caption se houver
+    if (quotedMessage.imageMessage?.caption) {
+      return quotedMessage.imageMessage.caption;
+    }
+    
+    if (quotedMessage.videoMessage?.caption) {
+      return quotedMessage.videoMessage.caption;
+    }
+    
+    if (quotedMessage.documentMessage?.caption) {
+      return quotedMessage.documentMessage.caption;
+    }
+    
+    // Se não há texto disponível, retornar undefined
+    return undefined;
   }
 }
