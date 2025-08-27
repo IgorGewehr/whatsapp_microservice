@@ -741,18 +741,7 @@ export class WhatsAppService extends EventEmitter {
         mediaType
       });
 
-      // Enviar texto primeiro se houver
-      if (messageData.message && messageData.message.trim()) {
-        const textMessage = await session.socket!.sendMessage(jid, {
-          text: messageData.message
-        });
-        if (textMessage?.key?.id) {
-          messageIds.push(textMessage.key.id);
-        }
-        
-        // Pequena pausa entre texto e mídias
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
+      // Não enviar texto separadamente - será usado como caption nas mídias
 
       // Enviar cada mídia sequencialmente
       for (let i = 0; i < mediaUrls.length; i++) {
@@ -762,7 +751,8 @@ export class WhatsAppService extends EventEmitter {
           tenantId: tenantId.substring(0, 8) + '***',
           index: i + 1,
           total: mediaUrls.length,
-          mediaType
+          mediaType,
+          urlPreview: mediaUrl.substring(0, 100) + '...'
         });
 
         try {
@@ -776,18 +766,18 @@ export class WhatsAppService extends EventEmitter {
           if (mediaType === 'image') {
             content = {
               image: Buffer.from(buffer),
-              caption: i === 0 ? messageData.caption : undefined // Caption apenas na primeira
+              caption: i === 0 ? (messageData.message || messageData.caption) : undefined // Usar message como caption na primeira imagem
             };
           } else if (mediaType === 'video') {
             content = {
               video: Buffer.from(buffer),
-              caption: i === 0 ? messageData.caption : undefined
+              caption: i === 0 ? (messageData.message || messageData.caption) : undefined
             };
           } else if (mediaType === 'document') {
             content = {
               document: Buffer.from(buffer),
               fileName: messageData.fileName || `document_${i + 1}`,
-              caption: i === 0 ? messageData.caption : undefined
+              caption: i === 0 ? (messageData.message || messageData.caption) : undefined
             };
           }
 
@@ -802,7 +792,8 @@ export class WhatsAppService extends EventEmitter {
           }
 
         } catch (mediaError: unknown) {
-          console.log(`Failed to send media ${i + 1}:`, mediaError);
+          console.log(`❌ [Multiple Media] Failed to send media ${i + 1}:`, mediaError);
+          console.log(`📎 [Multiple Media] Failed URL: ${mediaUrl.substring(0, 100)}...`);
           // Continuar com as próximas mídias mesmo se uma falhar
         }
       }
@@ -813,7 +804,7 @@ export class WhatsAppService extends EventEmitter {
         tenantId: tenantId.substring(0, 8) + '***',
         to: messageData.to.substring(0, 6) + '***',
         sentCount: messageIds.length,
-        totalRequested: mediaUrls.length + (messageData.message ? 1 : 0)
+        totalRequested: mediaUrls.length
       });
 
       return {
