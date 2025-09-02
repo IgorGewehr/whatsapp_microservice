@@ -662,7 +662,15 @@ export class WhatsAppService extends EventEmitter {
         };
       }
 
-      const jid = messageData.to.includes('@') ? messageData.to : `${messageData.to}@s.whatsapp.net`;
+      // Suporte para WhatsApp Business - detectar se já é um JID completo
+      let jid: string;
+      if (messageData.to.includes('@')) {
+        // Já é um JID (pode ser @lid para WhatsApp Business ou @s.whatsapp.net)
+        jid = messageData.to;
+      } else {
+        // É apenas um número, adicionar sufixo padrão
+        jid = `${messageData.to}@s.whatsapp.net`;
+      }
 
       // 🚀 NOVO: Suporte a múltiplas mídias
       if (messageData.type === 'media' && messageData.mediaUrls && messageData.mediaUrls.length > 0) {

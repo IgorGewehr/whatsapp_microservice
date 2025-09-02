@@ -53,12 +53,26 @@ const upload = multer({
 
 // Schema para validação de mensagens
 const sendMessageSchema = Joi.object({
-  to: Joi.string().required().pattern(/^\+?[1-9]\d{10,14}$/).messages({
-    'string.pattern.base': 'Phone number must be in international format (+5511999999999)'
+  clientPhone: Joi.string().required().custom((value, helpers) => {
+    // Aceitar números de telefone ou IDs de conversa do WhatsApp Business
+    const phonePattern = /^\+?[1-9]\d{10,14}$/;
+    const businessIdPattern = /^[0-9]+@lid$/;
+    const fullJidPattern = /^[0-9]+@[a-z\.]+$/;
+    
+    if (phonePattern.test(value) || businessIdPattern.test(value) || fullJidPattern.test(value)) {
+      return value;
+    }
+    
+    return helpers.error('any.invalid');
+  }).messages({
+    'any.invalid': 'Must be a valid phone number (+5511999999999) or WhatsApp Business conversation ID (123456@lid)'
   }),
   message: Joi.string().required().max(4096).messages({
     'string.max': 'Message cannot exceed 4096 characters'
   }),
+  // Campos opcionais para compatibilidade com diferentes formatos
+  propertyIndex: Joi.number().optional(),
+  totalProperties: Joi.number().optional(),
   type: Joi.string().valid('text', 'image', 'video', 'document', 'media').default('text'),
   mediaUrls: Joi.array().items(Joi.string().uri()).optional(),
   mediaType: Joi.string().valid('image', 'video', 'document').optional(),
@@ -68,7 +82,18 @@ const sendMessageSchema = Joi.object({
 
 const sendBulkMessageSchema = Joi.object({
   messages: Joi.array().items(Joi.object({
-    to: Joi.string().required().pattern(/^\+?[1-9]\d{10,14}$/),
+    clientPhone: Joi.string().required().custom((value, helpers) => {
+      // Aceitar números de telefone ou IDs de conversa do WhatsApp Business
+      const phonePattern = /^\+?[1-9]\d{10,14}$/;
+      const businessIdPattern = /^[0-9]+@lid$/;
+      const fullJidPattern = /^[0-9]+@[a-z\.]+$/;
+      
+      if (phonePattern.test(value) || businessIdPattern.test(value) || fullJidPattern.test(value)) {
+        return value;
+      }
+      
+      return helpers.error('any.invalid');
+    }),
     message: Joi.string().required().max(4096),
     type: Joi.string().valid('text', 'image', 'video', 'document', 'media').default('text'),
     mediaUrls: Joi.array().items(Joi.string().uri()).optional(),
@@ -89,7 +114,12 @@ export function messageRoutes(whatsappService: WhatsAppService, tenantManager: T
     validateRequestBody(sendMessageSchema),
     handleAsync(async (req, res) => {
       const { tenantId } = req.params;
-      const messageData: MessageData = req.body;
+      
+      // Usar clientPhone como campo principal
+      const messageData: MessageData = {
+        ...req.body,
+        to: req.body.clientPhone // Mapear clientPhone para to
+      };
       
       try {
         const result = await whatsappService.sendMessage(tenantId, messageData);
@@ -163,8 +193,15 @@ export function messageRoutes(whatsappService: WhatsAppService, tenantManager: T
           }
         }
 
+        // Processar o destinatário - manter IDs de conversa intactos
+        let processedTo = to;
+        if (!to.includes('@')) {
+          // Só remover caracteres não numéricos se for um número de telefone
+          processedTo = to.replace(/\D/g, '');
+        }
+        
         const messageData: MessageData = {
-          to: to.replace(/\D/g, ''), // Remover caracteres não numéricos
+          to: processedTo,
           message,
           type: mediaType as 'image' | 'video' | 'document',
           mediaUrl: `${config.BASE_URL}/uploads/${req.file.filename}`,
@@ -220,22 +257,28 @@ export function messageRoutes(whatsappService: WhatsAppService, tenantManager: T
         const results = [];
         
         for (let i = 0; i < messages.length; i++) {
-          const messageData = messages[i];
+          const message = messages[i];
+          
+          // Mapear clientPhone para to
+          const messageData: MessageData = {
+            ...message,
+            to: message.clientPhone
+          };
           
           try {
             const result = await whatsappService.sendMessage(tenantId, messageData);
             
             results.push({
               index: i,
-              to: messageData.to,
+              to: message.clientPhone,
               success: result.success,
               messageId: result.messageId,
               error: result.error
             });
             
             // Aplicar delay entre mensagens se especificado
-            if (i < messages.length - 1 && messageData.delay) {
-              await new Promise(resolve => setTimeout(resolve, messageData.delay));
+            if (i < messages.length - 1 && message.delay) {
+              await new Promise(resolve => setTimeout(resolve, message.delay));
             } else if (i < messages.length - 1) {
               // Delay padrão de 2s entre mensagens para evitar spam
               await new Promise(resolve => setTimeout(resolve, 2000));
@@ -245,7 +288,7 @@ export function messageRoutes(whatsappService: WhatsAppService, tenantManager: T
             const err = error as Error;
             results.push({
               index: i,
-              to: messageData.to,
+              to: message.clientPhone,
               success: false,
               error: err.message
             });
