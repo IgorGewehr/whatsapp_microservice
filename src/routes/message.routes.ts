@@ -53,6 +53,8 @@ const upload = multer({
 
 // Schema para validação de mensagens
 const sendMessageSchema = Joi.object({
+  // Aceitar tenantId no body (opcional, pois pode vir pela URL)
+  tenantId: Joi.string().optional(),
   // Aceitar tanto 'to' quanto 'clientPhone' para compatibilidade
   to: Joi.string().custom((value, helpers) => {
     // Aceitar números de telefone ou IDs de conversa do WhatsApp Business
@@ -135,12 +137,90 @@ const sendBulkMessageSchema = Joi.object({
 export function messageRoutes(whatsappService: WhatsAppService, tenantManager: TenantManager): Router {
   const router = Router();
 
-  // Enviar mensagem de texto
+  // Nova rota: Enviar mensagem com tenantId no body (mais flexível para n8n)
+  router.post('/send',
+    validateRequestBody(sendMessageSchema),
+    handleAsync(async (req, res) => {
+      // TenantId deve vir no body
+      const tenantId = req.body.tenantId;
+      
+      if (!tenantId) {
+        return res.status(400).json({
+          success: false,
+          error: 'tenantId is required',
+          message: 'Please provide tenantId in request body',
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+      // Validar acesso do tenant
+      const tenant = await tenantManager.getTenant(tenantId);
+      if (!tenant || !tenant.active) {
+        return res.status(403).json({
+          success: false,
+          error: 'Invalid or inactive tenant',
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+      // Aceitar tanto 'to' quanto 'clientPhone' para compatibilidade
+      const to = req.body.to || req.body.clientPhone;
+      
+      const messageData: MessageData = {
+        ...req.body,
+        to: to
+      };
+      
+      try {
+        const result = await whatsappService.sendMessage(tenantId, messageData);
+        
+        if (result.success) {
+          res.json({
+            success: true,
+            data: {
+              messageId: result.messageId,
+              to: messageData.to,
+              type: messageData.type || 'text'
+            },
+            timestamp: new Date().toISOString()
+          });
+        } else {
+          res.status(400).json({
+            success: false,
+            error: result.error,
+            message: 'Failed to send message',
+            timestamp: new Date().toISOString()
+          });
+        }
+        
+      } catch (error: unknown) {
+        const err = error as Error;
+        res.status(500).json({
+          success: false,
+          error: 'Internal server error',
+          message: err.message,
+          timestamp: new Date().toISOString()
+        });
+      }
+    })
+  );
+
+  // Rota original: Enviar mensagem de texto (mantém compatibilidade)
   router.post('/:tenantId/send', 
     validateTenantAccess(tenantManager, ['messages:send']),
     validateRequestBody(sendMessageSchema),
     handleAsync(async (req, res) => {
-      const { tenantId } = req.params;
+      // Aceitar tenantId tanto da URL quanto do body
+      const tenantId = req.body.tenantId || req.params.tenantId;
+      
+      if (!tenantId) {
+        return res.status(400).json({
+          success: false,
+          error: 'tenantId is required',
+          message: 'Please provide tenantId in URL or request body',
+          timestamp: new Date().toISOString()
+        });
+      }
       
       // Aceitar tanto 'to' quanto 'clientPhone' para compatibilidade
       const to = req.body.to || req.body.clientPhone;
