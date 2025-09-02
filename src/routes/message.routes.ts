@@ -53,7 +53,22 @@ const upload = multer({
 
 // Schema para validação de mensagens
 const sendMessageSchema = Joi.object({
-  clientPhone: Joi.string().required().custom((value, helpers) => {
+  // Aceitar tanto 'to' quanto 'clientPhone' para compatibilidade
+  to: Joi.string().custom((value, helpers) => {
+    // Aceitar números de telefone ou IDs de conversa do WhatsApp Business
+    const phonePattern = /^\+?[1-9]\d{10,14}$/;
+    const businessIdPattern = /^[0-9]+@lid$/;
+    const fullJidPattern = /^[0-9]+@[a-z\.]+$/;
+    
+    if (phonePattern.test(value) || businessIdPattern.test(value) || fullJidPattern.test(value)) {
+      return value;
+    }
+    
+    return helpers.error('any.invalid');
+  }).messages({
+    'any.invalid': 'Must be a valid phone number (+5511999999999) or WhatsApp Business conversation ID (123456@lid)'
+  }),
+  clientPhone: Joi.string().custom((value, helpers) => {
     // Aceitar números de telefone ou IDs de conversa do WhatsApp Business
     const phonePattern = /^\+?[1-9]\d{10,14}$/;
     const businessIdPattern = /^[0-9]+@lid$/;
@@ -78,11 +93,23 @@ const sendMessageSchema = Joi.object({
   mediaType: Joi.string().valid('image', 'video', 'document').optional(),
   caption: Joi.string().max(1024).optional(),
   fileName: Joi.string().max(255).optional()
-});
+}).or('to', 'clientPhone'); // Aceitar pelo menos um dos campos
 
 const sendBulkMessageSchema = Joi.object({
   messages: Joi.array().items(Joi.object({
-    clientPhone: Joi.string().required().custom((value, helpers) => {
+    to: Joi.string().custom((value, helpers) => {
+      // Aceitar números de telefone ou IDs de conversa do WhatsApp Business
+      const phonePattern = /^\+?[1-9]\d{10,14}$/;
+      const businessIdPattern = /^[0-9]+@lid$/;
+      const fullJidPattern = /^[0-9]+@[a-z\.]+$/;
+      
+      if (phonePattern.test(value) || businessIdPattern.test(value) || fullJidPattern.test(value)) {
+        return value;
+      }
+      
+      return helpers.error('any.invalid');
+    }),
+    clientPhone: Joi.string().custom((value, helpers) => {
       // Aceitar números de telefone ou IDs de conversa do WhatsApp Business
       const phonePattern = /^\+?[1-9]\d{10,14}$/;
       const businessIdPattern = /^[0-9]+@lid$/;
@@ -100,7 +127,7 @@ const sendBulkMessageSchema = Joi.object({
     mediaType: Joi.string().valid('image', 'video', 'document').optional(),
     caption: Joi.string().max(1024).optional(),
     delay: Joi.number().min(1000).max(60000).optional() // Delay entre mensagens (1s-60s)
-  })).min(1).max(50).required().messages({
+  }).or('to', 'clientPhone')).min(1).max(50).required().messages({
     'array.max': 'Cannot send more than 50 messages at once'
   })
 });
@@ -115,10 +142,12 @@ export function messageRoutes(whatsappService: WhatsAppService, tenantManager: T
     handleAsync(async (req, res) => {
       const { tenantId } = req.params;
       
-      // Usar clientPhone como campo principal
+      // Aceitar tanto 'to' quanto 'clientPhone' para compatibilidade
+      const to = req.body.to || req.body.clientPhone;
+      
       const messageData: MessageData = {
         ...req.body,
-        to: req.body.clientPhone // Mapear clientPhone para to
+        to: to
       };
       
       try {
@@ -259,10 +288,10 @@ export function messageRoutes(whatsappService: WhatsAppService, tenantManager: T
         for (let i = 0; i < messages.length; i++) {
           const message = messages[i];
           
-          // Mapear clientPhone para to
+          // Aceitar tanto 'to' quanto 'clientPhone'
           const messageData: MessageData = {
             ...message,
-            to: message.clientPhone
+            to: message.to || message.clientPhone
           };
           
           try {
@@ -270,7 +299,7 @@ export function messageRoutes(whatsappService: WhatsAppService, tenantManager: T
             
             results.push({
               index: i,
-              to: message.clientPhone,
+              to: message.to || message.clientPhone,
               success: result.success,
               messageId: result.messageId,
               error: result.error
@@ -288,7 +317,7 @@ export function messageRoutes(whatsappService: WhatsAppService, tenantManager: T
             const err = error as Error;
             results.push({
               index: i,
-              to: message.clientPhone,
+              to: message.to || message.clientPhone,
               success: false,
               error: err.message
             });
