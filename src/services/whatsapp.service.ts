@@ -17,6 +17,7 @@ import { Logger } from 'pino';
 import { config } from '../config/config';
 import NodeCache from 'node-cache';
 import { PersistentQRService } from './persistent-qr.service';
+import { TranscriptionService } from './transcription.service';
 
 export interface WhatsAppSession {
   socket: WASocket | null;
@@ -54,6 +55,7 @@ export class WhatsAppService extends EventEmitter {
   private sessionDir: string;
   private reconnectTimers: Map<string, NodeJS.Timeout> = new Map();
   private persistentQRService: PersistentQRService;
+  private transcriptionService: TranscriptionService;
   private processedMessages: Set<string> = new Set(); // Cache de mensagens processadas
   private messageQueues: Map<string, MessageQueue> = new Map(); // Filas de mensagens por cliente
 
@@ -69,6 +71,9 @@ export class WhatsAppService extends EventEmitter {
     
     // OPTIMIZED: Initialize persistent QR service
     this.persistentQRService = new PersistentQRService(this.logger, this);
+    
+    // Initialize transcription service
+    this.transcriptionService = new TranscriptionService(this.logger);
     
     this.ensureSessionDirectory();
     this.startCleanupInterval();
@@ -598,24 +603,85 @@ export class WhatsAppService extends EventEmitter {
 
     // Extrair textos de todas as mensagens e consolidar
     const consolidatedTexts: string[] = [];
+    const audioTranscriptions: string[] = [];
     const firstMessage = queue.messages[0];
+    let hasAudio = false;
     
     for (const message of queue.messages) {
+      // Processar mensagem de texto
       const messageText = message.message?.conversation || 
                          message.message?.extendedTextMessage?.text || '';
       if (messageText.trim()) {
         consolidatedTexts.push(messageText.trim());
       }
+      
+      // Processar áudio se transcrição estiver habilitada
+      if (config.TRANSCRIPTION_ENABLED && this.transcriptionService.isEnabled()) {
+        const audioMessage = message.message?.audioMessage;
+        if (audioMessage && audioMessage.url) {
+          hasAudio = true;
+          try {
+            console.log('🎤 [Queue] Processing audio message', {
+              tenantId: tenantId.substring(0, 8) + '***',
+              duration: audioMessage.seconds,
+              mimetype: audioMessage.mimetype
+            });
+            
+            // Baixar áudio
+            const session = this.sessions.get(tenantId);
+            if (session?.socket) {
+              const buffer = await session.socket.downloadMediaMessage(
+                message,
+                'buffer',
+                {},
+                {
+                  logger: this.logger as any,
+                  reuploadRequest: session.socket.updateMediaMessage
+                }
+              ) as Buffer;
+              
+              // Transcrever áudio
+              const transcriptionResult = await this.transcriptionService.transcribeAudio(
+                buffer,
+                audioMessage.mimetype || 'audio/ogg'
+              );
+              
+              if (transcriptionResult.success && transcriptionResult.text) {
+                audioTranscriptions.push(`[Áudio transcrito]: ${transcriptionResult.text}`);
+                console.log('✅ [Queue] Audio transcribed successfully', {
+                  tenantId: tenantId.substring(0, 8) + '***',
+                  textLength: transcriptionResult.text.length
+                });
+              } else {
+                audioTranscriptions.push('[Áudio não transcrito - erro na transcrição]');
+                console.log('❌ [Queue] Audio transcription failed', {
+                  tenantId: tenantId.substring(0, 8) + '***',
+                  error: transcriptionResult.error
+                });
+              }
+            }
+          } catch (error) {
+            console.log('❌ [Queue] Error processing audio', {
+              tenantId: tenantId.substring(0, 8) + '***',
+              error: error instanceof Error ? error.message : 'Unknown error'
+            });
+            audioTranscriptions.push('[Áudio não transcrito - erro no download]');
+          }
+        }
+      }
     }
 
-    // Juntar todas as mensagens em uma só
-    const consolidatedMessage = consolidatedTexts.join(' ');
+    // Juntar todas as mensagens e transcrições em uma só
+    const allMessages = [...consolidatedTexts, ...audioTranscriptions];
+    const consolidatedMessage = allMessages.join(' ');
     
     console.log('📤 [Queue] Sending consolidated message', {
       tenantId: tenantId.substring(0, 8) + '***',
       clientPhone: clientPhone.replace('@s.whatsapp.net', '').substring(0, 6) + '***',
       originalMessages: queue.messages.length,
-      consolidatedLength: consolidatedMessage.length
+      consolidatedLength: consolidatedMessage.length,
+      hasAudio,
+      audioTranscriptions: audioTranscriptions.length
     });
 
     // Buscar messageReplied da primeira mensagem que tem reply
@@ -627,9 +693,11 @@ export class WhatsAppService extends EventEmitter {
       id: firstMessage.key.id,
       timestamp: firstMessage.messageTimestamp,
       text: consolidatedMessage,
-      type: 'text',
+      type: hasAudio ? 'audio_transcribed' : 'text',
       consolidated: true, // Flag para indicar mensagem consolidada
-      originalCount: queue.messages.length // Quantas mensagens originais foram consolidadas
+      originalCount: queue.messages.length, // Quantas mensagens originais foram consolidadas
+      hasAudio,
+      transcriptionCount: audioTranscriptions.length
     };
     
     // Adicionar messageReplied se existir

@@ -242,6 +242,62 @@ WHATSAPP_API_KEY=sua-api-key-segura
 WHATSAPP_USE_EXTERNAL=true
 ```
 
+## 🎤 Transcrição de Áudio (Novo!)
+
+O microserviço agora suporta transcrição automática de mensagens de áudio usando OpenAI Whisper, Google Cloud Speech-to-Text ou Whisper local.
+
+### Configuração
+
+```bash
+# .env
+TRANSCRIPTION_ENABLED=true
+TRANSCRIPTION_PROVIDER=openai  # openai, google ou local
+TRANSCRIPTION_API_KEY=sk-...   # Sua chave da OpenAI
+TRANSCRIPTION_MODEL=whisper-1  # Modelo do Whisper
+TRANSCRIPTION_LANGUAGE=pt      # Idioma padrão (português)
+```
+
+### Como Funciona
+
+1. **Recepção de Áudio**: Quando um cliente envia áudio no WhatsApp
+2. **Download Automático**: O serviço baixa o arquivo de áudio
+3. **Transcrição**: Envia para a API configurada (OpenAI por padrão)
+4. **Webhook**: Envia o texto transcrito junto com a mensagem
+
+### Formato do Webhook com Áudio
+
+```json
+{
+  "event": "message",
+  "tenantId": "tenant-123",
+  "data": {
+    "from": "5511999999999",
+    "text": "[Áudio transcrito]: Olá, esta é uma mensagem de voz",
+    "type": "audio_transcribed",
+    "hasAudio": true,
+    "transcriptionCount": 1,
+    "timestamp": 1703123456
+  }
+}
+```
+
+### Custos de Transcrição
+
+- **OpenAI Whisper**: $0.006/minuto
+- **Google Cloud**: $0.009-$0.016/minuto
+- **Whisper Local**: Gratuito (requer mais CPU/GPU)
+
+### Testar Transcrição
+
+```bash
+# Testar a API de transcrição
+export TRANSCRIPTION_API_KEY="sua-chave-openai"
+node test-transcription.js
+
+# Verificar status da transcrição
+curl http://localhost:3000/api/v1/sessions/transcription/status
+```
+
 ## 🛠️ Recursos Avançados
 
 ### Multi-tenant por Design

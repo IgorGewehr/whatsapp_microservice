@@ -5,6 +5,7 @@ import { validateTenantAccess } from '../middleware/tenant.middleware';
 import { handleAsync } from '../utils/async-handler';
 import { validateRequestBody } from '../middleware/validation.middleware';
 import Joi from 'joi';
+import { config } from '../config/config';
 
 const startSessionSchema = Joi.object({
   // Opcionalmente aceitar configurações específicas para a sessão
@@ -204,6 +205,23 @@ export function sessionRoutes(whatsappService: WhatsAppService, tenantManager: T
           timestamp: new Date().toISOString()
         });
       }
+    })
+  );
+
+  // Status da transcrição de áudio
+  router.get('/transcription/status',
+    handleAsync(async (req, res) => {
+      res.json({
+        success: true,
+        data: {
+          enabled: config.TRANSCRIPTION_ENABLED,
+          provider: config.TRANSCRIPTION_PROVIDER,
+          model: config.TRANSCRIPTION_MODEL,
+          language: config.TRANSCRIPTION_LANGUAGE,
+          configured: !!config.TRANSCRIPTION_API_KEY
+        },
+        timestamp: new Date().toISOString()
+      });
     })
   );
 

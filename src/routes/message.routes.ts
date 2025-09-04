@@ -93,6 +93,7 @@ const sendMessageSchema = Joi.object({
   type: Joi.string().valid('text', 'image', 'video', 'document', 'media').default('text'),
   mediaUrls: Joi.array().items(Joi.string().uri()).optional(),
   mediaType: Joi.string().valid('image', 'video', 'document').optional(),
+  mediaCount: Joi.number().optional(),
   caption: Joi.string().max(1024).optional(),
   fileName: Joi.string().max(255).optional()
 }).or('to', 'clientPhone'); // Aceitar pelo menos um dos campos

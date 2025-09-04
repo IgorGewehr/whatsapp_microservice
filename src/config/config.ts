@@ -55,6 +55,13 @@ const configSchema = z.object({
   DO_SPACES_ACCESS_KEY: z.string().optional(),
   DO_SPACES_SECRET_KEY: z.string().optional(),
   DO_SPACES_BUCKET: z.string().optional(),
+  
+  // Transcrição de áudio
+  TRANSCRIPTION_ENABLED: z.coerce.boolean().default(false),
+  TRANSCRIPTION_PROVIDER: z.enum(['openai', 'google', 'local']).default('openai'),
+  TRANSCRIPTION_API_KEY: z.string().optional(),
+  TRANSCRIPTION_MODEL: z.string().default('whisper-1'),
+  TRANSCRIPTION_LANGUAGE: z.string().default('pt'),
 });
 
 // Validar e carregar configurações
@@ -97,6 +104,12 @@ const rawConfig = {
   DO_SPACES_ACCESS_KEY: process.env.DO_SPACES_ACCESS_KEY,
   DO_SPACES_SECRET_KEY: process.env.DO_SPACES_SECRET_KEY,
   DO_SPACES_BUCKET: process.env.DO_SPACES_BUCKET,
+  
+  TRANSCRIPTION_ENABLED: process.env.TRANSCRIPTION_ENABLED,
+  TRANSCRIPTION_PROVIDER: process.env.TRANSCRIPTION_PROVIDER,
+  TRANSCRIPTION_API_KEY: process.env.TRANSCRIPTION_API_KEY,
+  TRANSCRIPTION_MODEL: process.env.TRANSCRIPTION_MODEL,
+  TRANSCRIPTION_LANGUAGE: process.env.TRANSCRIPTION_LANGUAGE,
 };
 
 // Parsear e validar configurações
