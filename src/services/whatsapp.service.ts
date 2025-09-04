@@ -507,7 +507,8 @@ export class WhatsAppService extends EventEmitter {
       const messageReplied = this.extractRepliedMessage(message);
       const messageKey = `${tenantId}_${message.key.remoteJid}_${message.key.id}_${message.messageTimestamp}`;
       // Hash considerando texto OU áudio
-      const contentIdentifier = hasAudio ? 
+      const hasAudioForHash = !!message.message?.audioMessage;
+      const contentIdentifier = hasAudioForHash ? 
         `AUDIO_${message.message?.audioMessage?.seconds}_${message.message?.audioMessage?.mimetype}` :
         messageText.trim().substring(0, 50);
       const contentHash = `${tenantId}_${message.key.remoteJid}_${contentIdentifier}_${Math.floor((message.messageTimestamp || 0) / 60000)}`;
