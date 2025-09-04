@@ -488,6 +488,17 @@ export class WhatsAppService extends EventEmitter {
         continue;
       }
 
+      // ===== LOG DETALHADO DA MENSAGEM RECEBIDA =====
+      console.log('📱 [WhatsApp] Processing message', {
+        tenantId: tenantId.substring(0, 8) + '***',
+        messageId: message.key.id?.substring(0, 8) + '***',
+        from: message.key.remoteJid?.replace('@s.whatsapp.net', '').substring(0, 6) + '***',
+        messageType: Object.keys(message.message || {}),
+        hasAudio: !!message.message?.audioMessage,
+        hasText: !!(message.message?.conversation || message.message?.extendedTextMessage?.text),
+        timestamp: message.messageTimestamp
+      });
+
       // ===== FILTRO ANTI-DUPLICAÇÃO MELHORADO =====
       const messageText = message.message.conversation || 
                          message.message.extendedTextMessage?.text || '';
@@ -495,7 +506,11 @@ export class WhatsAppService extends EventEmitter {
       // ===== EXTRAÇÃO DE MENSAGEM RESPONDIDA =====
       const messageReplied = this.extractRepliedMessage(message);
       const messageKey = `${tenantId}_${message.key.remoteJid}_${message.key.id}_${message.messageTimestamp}`;
-      const contentHash = `${tenantId}_${message.key.remoteJid}_${messageText.trim().substring(0, 50)}_${Math.floor((message.messageTimestamp || 0) / 60000)}`; // Hash por minuto
+      // Hash considerando texto OU áudio
+      const contentIdentifier = hasAudio ? 
+        `AUDIO_${message.message?.audioMessage?.seconds}_${message.message?.audioMessage?.mimetype}` :
+        messageText.trim().substring(0, 50);
+      const contentHash = `${tenantId}_${message.key.remoteJid}_${contentIdentifier}_${Math.floor((message.messageTimestamp || 0) / 60000)}`;
       
       // Verificar duplicação por ID E por conteúdo
       if (this.processedMessages.has(messageKey) || this.processedMessages.has(contentHash)) {
@@ -517,13 +532,27 @@ export class WhatsAppService extends EventEmitter {
         session.lastActivity = new Date();
       }
       
-      // Filtrar mensagens vazias
-      if (!messageText.trim()) {
-        console.log('⚠️ [WhatsApp] Empty message, skipping', {
+      // Filtrar mensagens vazias (MAS permitir áudios sem texto)
+      const hasAudio = !!message.message?.audioMessage;
+      if (!messageText.trim() && !hasAudio) {
+        console.log('⚠️ [WhatsApp] Empty message without audio, skipping', {
           tenantId: tenantId.substring(0, 8) + '***',
-          messageId: message.key.id?.substring(0, 8) + '***'
+          messageId: message.key.id?.substring(0, 8) + '***',
+          hasAudio
         });
         continue;
+      }
+      
+      // LOG especial para mensagens de áudio
+      if (hasAudio) {
+        console.log('🎤 [WhatsApp] Audio message detected', {
+          tenantId: tenantId.substring(0, 8) + '***',
+          messageId: message.key.id?.substring(0, 8) + '***',
+          audioUrl: message.message?.audioMessage?.url ? 'present' : 'missing',
+          duration: message.message?.audioMessage?.seconds,
+          mimetype: message.message?.audioMessage?.mimetype,
+          transcriptionEnabled: config.TRANSCRIPTION_ENABLED
+        });
       }
 
       console.log('📨 [WhatsApp] Processing new message', {
@@ -615,13 +644,42 @@ export class WhatsAppService extends EventEmitter {
         consolidatedTexts.push(messageText.trim());
       }
       
+      // Detectar áudios mesmo se transcrição não estiver habilitada
+      const audioMessage = message.message?.audioMessage;
+      if (audioMessage) {
+        hasAudio = true;
+        console.log('🎤 [Queue] Found audio message', {
+          tenantId: tenantId.substring(0, 8) + '***',
+          duration: audioMessage.seconds,
+          mimetype: audioMessage.mimetype,
+          transcriptionEnabled: config.TRANSCRIPTION_ENABLED,
+          transcriptionReady: this.transcriptionService.isEnabled()
+        });
+        
+        // Se transcrição não estiver habilitada, adicionar placeholder
+        if (!config.TRANSCRIPTION_ENABLED || !this.transcriptionService.isEnabled()) {
+          audioTranscriptions.push('[Áudio recebido - transcrição desabilitada]');
+        }
+      }
+
       // Processar áudio se transcrição estiver habilitada
-      if (config.TRANSCRIPTION_ENABLED && this.transcriptionService.isEnabled()) {
-        const audioMessage = message.message?.audioMessage;
-        if (audioMessage && audioMessage.url) {
-          hasAudio = true;
+      if (config.TRANSCRIPTION_ENABLED && this.transcriptionService.isEnabled() && audioMessage) {
+        console.log('🎤 [Queue] Starting audio transcription process', {
+          tenantId: tenantId.substring(0, 8) + '***',
+          hasUrl: !!audioMessage.url,
+          duration: audioMessage.seconds,
+          mimetype: audioMessage.mimetype,
+          fileSize: audioMessage.fileLength
+        });
+          
+          if (!audioMessage.url) {
+            console.log('❌ [Queue] Audio message missing URL, skipping transcription');
+            audioTranscriptions.push('[Áudio não transcrito - URL não disponível]');
+            continue;
+          }
+          
           try {
-            console.log('🎤 [Queue] Processing audio message', {
+            console.log('🎤 [Queue] Starting audio download and transcription', {
               tenantId: tenantId.substring(0, 8) + '***',
               duration: audioMessage.seconds,
               mimetype: audioMessage.mimetype
@@ -629,16 +687,30 @@ export class WhatsAppService extends EventEmitter {
             
             // Baixar áudio
             const session = this.sessions.get(tenantId);
-            if (session?.socket) {
-              const buffer = await session.socket.downloadMediaMessage(
-                message,
-                'buffer',
-                {},
-                {
-                  logger: this.logger as any,
-                  reuploadRequest: session.socket.updateMediaMessage
-                }
-              ) as Buffer;
+            if (!session?.socket) {
+              throw new Error('WhatsApp session not available for media download');
+            }
+            
+            console.log('⬇️ [Queue] Downloading audio from WhatsApp', {
+              tenantId: tenantId.substring(0, 8) + '***',
+              sessionConnected: session.status === 'connected'
+            });
+            
+            const buffer = await session.socket.downloadMediaMessage(
+              message,
+              'buffer',
+              {},
+              {
+                logger: this.logger as any,
+                reuploadRequest: session.socket.updateMediaMessage
+              }
+            ) as Buffer;
+            
+            console.log('✅ [Queue] Audio downloaded successfully', {
+              tenantId: tenantId.substring(0, 8) + '***',
+              bufferSize: buffer.length,
+              sizeInKB: Math.round(buffer.length / 1024)
+            });
               
               // Transcrever áudio
               const transcriptionResult = await this.transcriptionService.transcribeAudio(
@@ -663,9 +735,23 @@ export class WhatsAppService extends EventEmitter {
           } catch (error) {
             console.log('❌ [Queue] Error processing audio', {
               tenantId: tenantId.substring(0, 8) + '***',
-              error: error instanceof Error ? error.message : 'Unknown error'
+              error: error instanceof Error ? error.message : 'Unknown error',
+              stack: error instanceof Error ? error.stack?.substring(0, 200) : undefined
             });
-            audioTranscriptions.push('[Áudio não transcrito - erro no download]');
+            
+            // Tentar identificar o tipo de erro
+            let errorMessage = '[Áudio não transcrito - erro desconhecido]';
+            if (error instanceof Error) {
+              if (error.message.includes('downloadMediaMessage')) {
+                errorMessage = '[Áudio não transcrito - erro no download]';
+              } else if (error.message.includes('API')) {
+                errorMessage = '[Áudio não transcrito - erro na API de transcrição]';
+              } else if (error.message.includes('session')) {
+                errorMessage = '[Áudio não transcrito - sessão não disponível]';
+              }
+            }
+            
+            audioTranscriptions.push(errorMessage);
           }
         }
       }
@@ -985,6 +1071,13 @@ export class WhatsAppService extends EventEmitter {
     });
     
     return {};
+  }
+
+  /**
+   * Get session by tenantId (for debugging)
+   */
+  getSession(tenantId: string): WhatsAppSession | undefined {
+    return this.sessions.get(tenantId);
   }
 
   /**

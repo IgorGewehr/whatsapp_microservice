@@ -13,6 +13,7 @@ import { validateRequestBody } from './middleware/validation.middleware';
 import { sessionRoutes } from './routes/session.routes';
 import { messageRoutes } from './routes/message.routes';
 import { webhookRoutes } from './routes/webhook.routes';
+import { debugRoutes } from './routes/debug.routes';
 import { StatusService } from './services/status.service';
 import { WebhookService } from './services/webhook.service';
 
@@ -174,11 +175,13 @@ app.get('/', (req, res) => {
 // Middleware de autenticação (apenas para rotas protegidas)
 app.use('/api/v1/sessions', authMiddleware);
 app.use('/api/v1/messages', authMiddleware);
+app.use('/api/v1/debug', authMiddleware);
 
 // Rotas da API
 app.use('/api/v1/sessions', sessionRoutes(whatsappService, tenantManager));
 app.use('/api/v1/messages', messageRoutes(whatsappService, tenantManager));
 app.use('/api/v1/webhooks', webhookRoutes(whatsappService, tenantManager));
+app.use('/api/v1/debug', debugRoutes(whatsappService, tenantManager));
 
 // Documentação da API
 app.get('/docs', (req, res) => {
